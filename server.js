@@ -1,4 +1,4 @@
-// 📄 server.js - SERVIDOR PRINCIPAL
+// 📄 server.js - SERVIDOR PRINCIPAL CON REDIS HEALTH CHECK MEJORADO
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 require('dotenv').config();
 const express = require('express');
@@ -89,53 +89,88 @@ const authMiddleware = require('./src/middleware/auth.middleware');
 app.use(authMiddleware);
 
 // ═══════════════════════════════════════════════════════════════════
-// HEALTH CHECK
+// HEALTH CHECK MEJORADO CON TEST REAL DE REDIS
 // ═══════════════════════════════════════════════════════════════════
 app.get('/health', async (req, res) => {
   try {
-    // Verificar PostgreSQL
-    await sequelize.authenticate();
-    
-    // Verificar Redis
-    const redisStatus = redisClient.status === 'ready' ? 'connected' : 'disconnected';
-    
-    // Verificar API-Football
-    const apiFootballStatus = process.env.API_FOOTBALL_KEY ? 'configured' : 'not configured';
-
-    res.json({
+    const healthStatus = {
       status: 'OK',
       service: process.env.APP_NAME,
       version: '1.0.0',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
       environment: process.env.NODE_ENV,
-      port: process.env.PORT,
-      database: {
+      port: process.env.PORT
+    };
+
+    // ✅ VERIFICAR POSTGRESQL
+    try {
+      await sequelize.authenticate();
+      healthStatus.database = {
         status: 'connected',
         database: sequelize.config.database
-      },
-      cache: {
-        redis: redisStatus
-      },
-      externalApi: {
-        apiFootball: apiFootballStatus
-      },
-      features: {
-        fixtures: true,
-        odds: true,
-        teams: true,
-        leagues: true,
-        analytics: false, // TODO: Implementar en módulos posteriores
-        cache: redisStatus === 'connected'
+      };
+    } catch (dbError) {
+      healthStatus.database = {
+        status: 'disconnected',
+        error: dbError.message
+      };
+      healthStatus.status = 'DEGRADED';
+    }
+
+    // ✅ VERIFICAR REDIS CON TEST REAL
+    try {
+      const redisHealth = await redisClient.testConnection();
+      
+      healthStatus.cache = {
+        redis: redisHealth.status === 'healthy' ? 'connected' : 'disconnected',
+        ping: redisHealth.ping || null,
+        pingTime: redisHealth.pingTime || null,
+        readWrite: redisHealth.readWrite || null
+      };
+      
+      if (redisHealth.status !== 'healthy') {
+        healthStatus.status = 'DEGRADED';
+        healthStatus.cache.error = redisHealth.error;
       }
-    });
+      
+    } catch (redisError) {
+      healthStatus.cache = {
+        redis: 'disconnected',
+        error: redisError.message
+      };
+      healthStatus.status = 'DEGRADED';
+    }
+
+    // ✅ VERIFICAR API-FOOTBALL
+    const apiFootballStatus = process.env.API_FOOTBALL_KEY ? 'configured' : 'not configured';
+    healthStatus.externalApi = {
+      apiFootball: apiFootballStatus
+    };
+
+    // ✅ FEATURES DISPONIBLES
+    healthStatus.features = {
+      fixtures: true,
+      odds: true,
+      teams: true,
+      leagues: true,
+      analytics: false, // TODO: Implementar en módulos posteriores
+      cache: healthStatus.cache.redis === 'connected'
+    };
+
+    // Determinar status code según el estado
+    const statusCode = healthStatus.status === 'OK' ? 200 : 503;
+    
+    res.status(statusCode).json(healthStatus);
+    
   } catch (error) {
     logger.error('Health check failed:', error);
     res.status(500).json({
       status: 'ERROR',
       service: process.env.APP_NAME,
       timestamp: new Date().toISOString(),
-      error: 'Service temporarily unavailable'
+      error: 'Service temporarily unavailable',
+      details: error.message
     });
   }
 });
@@ -166,7 +201,8 @@ app.get('/', (req, res) => {
     },
     integrations: {
       apiFootball: process.env.API_FOOTBALL_KEY ? 'configured' : 'not configured',
-      backend1: process.env.BACKEND_1_URL || 'not configured'
+      backend1: process.env.BACKEND_1_URL || 'not configured',
+      redis: redisClient.isHealthy() ? 'connected' : 'connecting'
     }
   });
 });
@@ -226,46 +262,80 @@ app.use((err, req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// INICIALIZACIÓN DEL SERVIDOR
+// INICIALIZACIÓN DEL SERVIDOR CON VERIFICACIÓN DE REDIS
 // ═══════════════════════════════════════════════════════════════════
 const PORT = process.env.PORT || 3002;
 
 const startServer = async () => {
   try {
-    // Conectar a PostgreSQL
+    // ✅ CONECTAR A POSTGRESQL
     await sequelize.authenticate();
     logger.info('✅ Conexión a PostgreSQL establecida');
     
-    // Sincronizar modelos (sin alter en producción)
+    // ✅ SINCRONIZAR MODELOS
     if (process.env.NODE_ENV !== 'production') {
       await sequelize.sync({ alter: false });
       logger.info('✅ Modelos sincronizados');
     }
     
-    // Conectar a Redis
-    if (redisClient.status !== 'ready') {
-      // Redis se conecta automáticamente
-      logger.info('🔄 Conectando a Redis...');
-    } else {
-      logger.info('✅ Redis conectado');
+    // ✅ ESPERAR A QUE REDIS ESTÉ LISTO
+    console.log('🔄 Verificando conexión Redis...');
+    
+    try {
+      // Esperar hasta 15 segundos para que Redis esté listo
+      await Promise.race([
+        redisClient.ensureConnection(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout esperando Redis')), 15000)
+        )
+      ]);
+      
+      if (redisClient.isHealthy()) {
+        logger.info('✅ Redis conectado y verificado');
+      } else {
+        logger.warn('⚠️ Redis no está completamente listo, pero continuando...');
+      }
+      
+    } catch (redisError) {
+      logger.warn('⚠️ Redis no disponible al inicio:', redisError.message);
+      logger.info('🔄 El servidor continuará y Redis se conectará en background');
     }
     
     // TODO: Iniciar trabajos programados en módulos posteriores
     // require('./src/jobs/scheduler');
     
-    // Iniciar servidor
+    // ✅ INICIAR SERVIDOR
     app.listen(PORT, () => {
       logger.info(`🚀 ${process.env.APP_NAME} corriendo en puerto ${PORT}`);
       logger.info(`📚 Ambiente: ${process.env.NODE_ENV || 'development'}`);
       logger.info(`🔐 JWT configurado: ${process.env.JWT_SECRET ? 'Sí' : 'No'}`);
       logger.info(`📡 API-Football: ${process.env.API_FOOTBALL_KEY ? 'Configurada' : 'NO configurada'}`);
       logger.info(`🗄️ Base de datos: ${sequelize.config.database}`);
+      logger.info(`💾 Redis: ${redisClient.isHealthy() ? 'Conectado' : 'Conectando...'}`);
       
       console.log('\n📍 Endpoints disponibles:');
       console.log(`   - Service Info: GET http://localhost:${PORT}/`);
       console.log(`   - Health Check: GET http://localhost:${PORT}/health`);
       console.log('\n💡 Usa Ctrl+C para detener el servidor');
-      console.log('🎯 Próximo paso: Implementar MÓDULO 2 (Modelos)');
+      
+      // Verificar estado final después de 2 segundos
+      setTimeout(async () => {
+        try {
+          const redisHealth = await redisClient.testConnection();
+          if (redisHealth.status === 'healthy') {
+            console.log('🎯 ¡TODOS LOS SERVICIOS FUNCIONANDO CORRECTAMENTE!');
+            console.log(`   - PostgreSQL: ✅ Conectado`);
+            console.log(`   - Redis: ✅ Conectado (${redisHealth.pingTime})`);
+            console.log(`   - API-Football: ✅ Configurada`);
+            console.log('\n🚀 Listo para implementar próximos módulos!');
+          } else {
+            console.log('⚠️ Algunos servicios necesitan atención:');
+            console.log(`   - Redis: ${redisHealth.error || 'Verificar conexión'}`);
+          }
+        } catch (error) {
+          console.log('⚠️ Error verificando servicios:', error.message);
+        }
+      }, 2000);
     });
     
   } catch (error) {
@@ -278,7 +348,7 @@ const startServer = async () => {
 // MANEJO DE CIERRE GRACEFUL
 // ═══════════════════════════════════════════════════════════════════
 process.on('SIGINT', async () => {
-  logger.info('\n👋 Cerrando servidor...');
+  logger.info('\n👋 Cerrando servidor gracefully...');
   try {
     await sequelize.close();
     redisClient.disconnect();
