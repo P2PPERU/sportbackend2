@@ -210,10 +210,10 @@ app.get('/', (req, res) => {
 // ═══════════════════════════════════════════════════════════════════
 // RUTAS DE LA API (TODO: Implementar en módulos posteriores)
 // ═══════════════════════════════════════════════════════════════════
-// app.use('/api/fixtures', require('./src/routes/fixtures.routes'));
+   app.use('/api/fixtures', require('./src/routes/fixtures.routes'));
 // app.use('/api/teams', require('./src/routes/teams.routes'));
-// app.use('/api/leagues', require('./src/routes/leagues.routes'));
-// app.use('/api/odds', require('./src/routes/odds.routes'));
+   app.use('/api/leagues', require('./src/routes/leagues.routes'));
+   app.use('/api/odds', require('./src/routes/odds.routes'));
 // app.use('/api/admin', require('./src/routes/admin.routes'));
 
 // ═══════════════════════════════════════════════════════════════════

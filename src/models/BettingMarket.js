@@ -14,7 +14,7 @@ const BettingMarket = sequelize.define('BettingMarket', {
     comment: 'Clave única del mercado (ej: 1X2, OVER_UNDER_2_5)'
   },
   name: {
-    type: DataTypes.STRING(100),
+    type: DataTypes.STRING(150), // Aumentado para nombres más largos
     allowNull: false,
     comment: 'Nombre del mercado'
   },
@@ -24,12 +24,17 @@ const BettingMarket = sequelize.define('BettingMarket', {
   },
   category: {
     type: DataTypes.ENUM(
-      'MATCH_RESULT',    // Resultado del partido
-      'GOALS',           // Relacionado a goles
-      'HANDICAP',        // Hándicaps
-      'HALFTIME',        // Primer tiempo
-      'PLAYER_PROPS',    // Props de jugadores
-      'SPECIALS'         // Mercados especiales
+      'MATCH_RESULT',    // Resultado del partido (1X2, Double Chance)
+      'GOALS',           // Relacionado a goles (Over/Under, BTTS)
+      'HALFTIME',        // Primer tiempo (HT 1X2, HT Over/Under)
+      'SECOND_HALF',     // Segundo tiempo (ST Winner, ST Over/Under)
+      'CORNERS',         // Esquinas (Corners Over/Under, Corners 1X2)
+      'CARDS',           // Tarjetas (Cards Over/Under, Red Card)
+      'EXACT_SCORE',     // Resultado exacto (0-0, 1-1, etc.)
+      'HANDICAP',        // Hándicaps asiáticos/europeos
+      'SPECIALS',        // Mercados especiales (HT/FT, Win to Nil)
+      'PLAYER_PROPS',    // Props de jugadores (goles, asistencias)
+      'COMBINED'         // Mercados combinados (FT Result + BTTS)
     ),
     allowNull: false,
     comment: 'Categoría del mercado'
@@ -54,7 +59,7 @@ const BettingMarket = sequelize.define('BettingMarket', {
   priority: {
     type: DataTypes.INTEGER,
     defaultValue: 0,
-    comment: 'Prioridad de visualización'
+    comment: 'Prioridad de visualización (mayor = más importante)'
   },
   minOdds: {
     type: DataTypes.DECIMAL(10, 2),
@@ -67,6 +72,29 @@ const BettingMarket = sequelize.define('BettingMarket', {
     defaultValue: 100.00,
     field: 'max_odds',
     comment: 'Cuota máxima permitida'
+  },
+  // Nuevos campos para mejor funcionalidad
+  displayOrder: {
+    type: DataTypes.INTEGER,
+    defaultValue: 999,
+    field: 'display_order',
+    comment: 'Orden de visualización dentro de la categoría'
+  },
+  isPopular: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    field: 'is_popular',
+    comment: 'Si es un mercado popular para destacar'
+  },
+  iconName: {
+    type: DataTypes.STRING(50),
+    field: 'icon_name',
+    comment: 'Nombre del icono para la UI'
+  },
+  shortDescription: {
+    type: DataTypes.STRING(200),
+    field: 'short_description',
+    comment: 'Descripción corta para tooltips'
   }
 }, {
   tableName: 'betting_markets',
@@ -74,7 +102,10 @@ const BettingMarket = sequelize.define('BettingMarket', {
     { fields: ['key'] },
     { fields: ['category'] },
     { fields: ['is_active'] },
-    { fields: ['priority'] }
+    { fields: ['priority'] },
+    { fields: ['display_order'] },
+    { fields: ['is_popular'] },
+    { fields: ['category', 'display_order'] }
   ]
 });
 

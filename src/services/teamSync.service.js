@@ -1,4 +1,7 @@
 const { Team, League } = require('../models');
+const apiFootballService = require('./apiFootballService');
+const apiFootballMapper = require('../utils/apiFootballMapper');
+const logger = require('../utils/logger');
 
 class TeamSyncService {
   // Sincronizar equipos de una liga

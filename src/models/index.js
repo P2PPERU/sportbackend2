@@ -71,76 +71,33 @@ Fixture.hasOne(FixtureResult, { foreignKey: 'fixture_id', as: 'result' });
 // FUNCIÓN PARA CREAR DATOS INICIALES
 // ═══════════════════════════════════════════════════════════════════
 const createDefaultBettingMarkets = async () => {
-  const defaultMarkets = [
-    {
-      key: '1X2',
-      name: 'Match Winner',
-      description: 'Predicción del ganador del partido',
-      category: 'MATCH_RESULT',
-      possibleOutcomes: ['HOME', 'DRAW', 'AWAY'],
-      priority: 1
-    },
-    {
-      key: 'OVER_UNDER_2_5',
-      name: 'Over/Under 2.5 Goals',
-      description: 'Total de goles mayor o menor a 2.5',
-      category: 'GOALS',
-      possibleOutcomes: ['OVER', 'UNDER'],
-      parameters: { line: 2.5 },
-      priority: 2
-    },
-    {
-      key: 'BTTS',
-      name: 'Both Teams To Score',
-      description: 'Ambos equipos anotan al menos un gol',
-      category: 'GOALS',
-      possibleOutcomes: ['YES', 'NO'],
-      priority: 3
-    },
-    {
-      key: 'DOUBLE_CHANCE',
-      name: 'Double Chance',
-      description: 'Dos de tres posibles resultados',
-      category: 'MATCH_RESULT',
-      possibleOutcomes: ['1X', 'X2', '12'],
-      priority: 4
-    },
-    {
-      key: 'OVER_UNDER_1_5',
-      name: 'Over/Under 1.5 Goals',
-      description: 'Total de goles mayor o menor a 1.5',
-      category: 'GOALS',
-      possibleOutcomes: ['OVER', 'UNDER'],
-      parameters: { line: 1.5 },
-      priority: 5
-    },
-    {
-      key: 'OVER_UNDER_3_5',
-      name: 'Over/Under 3.5 Goals',
-      description: 'Total de goles mayor o menor a 3.5',
-      category: 'GOALS',
-      possibleOutcomes: ['OVER', 'UNDER'],
-      parameters: { line: 3.5 },
-      priority: 6
-    },
-    {
-      key: 'HT_1X2',
-      name: 'Halftime Result',
-      description: 'Resultado al medio tiempo',
-      category: 'HALFTIME',
-      possibleOutcomes: ['HOME', 'DRAW', 'AWAY'],
-      priority: 7
+  const { UPDATED_BETTING_MARKETS } = require('../scripts/updateBettingMarkets');
+  
+  try {
+    let created = 0;
+    
+    for (const marketData of UPDATED_BETTING_MARKETS) {
+      const [market, wasCreated] = await BettingMarket.findOrCreate({
+        where: { key: marketData.key },
+        defaults: marketData
+      });
+
+      if (wasCreated) {
+        created++;
+      }
     }
-  ];
 
-  for (const market of defaultMarkets) {
-    await BettingMarket.findOrCreate({
-      where: { key: market.key },
-      defaults: market
-    });
+    if (created > 0) {
+      console.log(`✅ ${created} mercados de apuestas creados`);
+    } else {
+      console.log('✅ Mercados de apuestas ya existían');
+    }
+
+    return true;
+  } catch (error) {
+    console.error('❌ Error creando mercados por defecto:', error);
+    throw error;
   }
-
-  console.log('✅ Mercados de apuestas por defecto creados');
 };
 
 // ═══════════════════════════════════════════════════════════════════

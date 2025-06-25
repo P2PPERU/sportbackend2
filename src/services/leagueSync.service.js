@@ -1,6 +1,7 @@
 const apiFootballService = require('./apiFootballService');
 const { League } = require('../models');
 const apiFootballMapper = require('../utils/apiFootballMapper');
+const logger = require('../utils/logger');
 
 class LeagueSyncService {
   // Sincronizar ligas principales

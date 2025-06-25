@@ -1,4 +1,8 @@
 const { Fixture, League, Team } = require('../models');
+const { Op } = require('sequelize');
+const apiFootballService = require('./apiFootballService');
+const apiFootballMapper = require('../utils/apiFootballMapper');
+const logger = require('../utils/logger');
 
 class FixtureSyncService {
   // Sincronizar fixtures de hoy
@@ -94,25 +98,62 @@ class FixtureSyncService {
   async processFixture(fixtureData) {
     try {
       // Buscar liga
-      const league = await League.findOne({
+      let league = await League.findOne({
         where: { apiFootballId: fixtureData.league.id }
       });
 
+      // Si no existe la liga, crearla
       if (!league) {
-        throw new Error(`Liga ${fixtureData.league.id} no encontrada`);
+        logger.info(`Creando liga: ${fixtureData.league.name} (${fixtureData.league.id})`);
+        const leagueData = {
+          apiFootballId: fixtureData.league.id,
+          name: fixtureData.league.name,
+          shortName: fixtureData.league.name.substring(0, 20),
+          country: fixtureData.league.country || 'Unknown',
+          countryCode: fixtureData.league.flag ? 'XX' : 'XX',
+          logo: fixtureData.league.logo,
+          season: fixtureData.league.season || 2024,
+          type: 'League',
+          isActive: true,
+          priority: 10,
+          lastSyncAt: new Date()
+        };
+        league = await League.create(leagueData);
       }
 
-      // Buscar equipos
-      const homeTeam = await Team.findOne({
+      // Buscar o crear equipos
+      let homeTeam = await Team.findOne({
         where: { apiFootballId: fixtureData.teams.home.id }
       });
 
-      const awayTeam = await Team.findOne({
+      if (!homeTeam) {
+        logger.info(`Creando equipo local: ${fixtureData.teams.home.name}`);
+        const homeTeamData = {
+          apiFootballId: fixtureData.teams.home.id,
+          name: fixtureData.teams.home.name,
+          shortName: fixtureData.teams.home.name.substring(0, 20),
+          logo: fixtureData.teams.home.logo,
+          isActive: true,
+          lastSyncAt: new Date()
+        };
+        homeTeam = await Team.create(homeTeamData);
+      }
+
+      let awayTeam = await Team.findOne({
         where: { apiFootballId: fixtureData.teams.away.id }
       });
 
-      if (!homeTeam || !awayTeam) {
-        throw new Error(`Equipos no encontrados: ${fixtureData.teams.home.id} o ${fixtureData.teams.away.id}`);
+      if (!awayTeam) {
+        logger.info(`Creando equipo visitante: ${fixtureData.teams.away.name}`);
+        const awayTeamData = {
+          apiFootballId: fixtureData.teams.away.id,
+          name: fixtureData.teams.away.name,
+          shortName: fixtureData.teams.away.name.substring(0, 20),
+          logo: fixtureData.teams.away.logo,
+          isActive: true,
+          lastSyncAt: new Date()
+        };
+        awayTeam = await Team.create(awayTeamData);
       }
 
       // Mapear datos del fixture
@@ -194,6 +235,108 @@ class FixtureSyncService {
 
     } catch (error) {
       logger.error('❌ Error actualizando fixtures finalizados:', error);
+      throw error;
+    }
+  }
+
+  // Obtener fixtures de hoy desde base de datos
+  async getTodayFixtures() {
+    try {
+      const today = new Date();
+      const startOfDay = new Date(today.setHours(0, 0, 0, 0));
+      const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+
+      const fixtures = await Fixture.findAll({
+        where: {
+          fixtureDate: {
+            [Op.between]: [startOfDay, endOfDay]
+          }
+        },
+        include: [
+          {
+            model: League,
+            as: 'league',
+            attributes: ['id', 'name', 'shortName', 'logo', 'country']
+          },
+          {
+            model: Team,
+            as: 'homeTeam',
+            attributes: ['id', 'name', 'shortName', 'logo']
+          },
+          {
+            model: Team,
+            as: 'awayTeam',
+            attributes: ['id', 'name', 'shortName', 'logo']
+          }
+        ],
+        order: [['fixtureDate', 'ASC']]
+      });
+
+      return fixtures;
+    } catch (error) {
+      logger.error('❌ Error obteniendo fixtures de hoy:', error);
+      throw error;
+    }
+  }
+
+  // Buscar fixtures por criterio
+  async searchFixtures(criteria = {}) {
+    try {
+      const where = {};
+      const include = [
+        {
+          model: League,
+          as: 'league',
+          attributes: ['id', 'name', 'shortName', 'logo', 'country']
+        },
+        {
+          model: Team,
+          as: 'homeTeam',
+          attributes: ['id', 'name', 'shortName', 'logo']
+        },
+        {
+          model: Team,
+          as: 'awayTeam',
+          attributes: ['id', 'name', 'shortName', 'logo']
+        }
+      ];
+
+      // Filtro por fecha
+      if (criteria.date) {
+        const date = new Date(criteria.date);
+        const startOfDay = new Date(date.setHours(0, 0, 0, 0));
+        const endOfDay = new Date(date.setHours(23, 59, 59, 999));
+        where.fixtureDate = { [Op.between]: [startOfDay, endOfDay] };
+      }
+
+      // Filtro por liga
+      if (criteria.leagueId) {
+        where.leagueId = criteria.leagueId;
+      }
+
+      // Filtro por estado
+      if (criteria.status) {
+        where.status = criteria.status;
+      }
+
+      // Filtro por equipo
+      if (criteria.teamId) {
+        where[Op.or] = [
+          { homeTeamId: criteria.teamId },
+          { awayTeamId: criteria.teamId }
+        ];
+      }
+
+      const fixtures = await Fixture.findAll({
+        where,
+        include,
+        order: [['fixtureDate', 'ASC']],
+        limit: criteria.limit || 50
+      });
+
+      return fixtures;
+    } catch (error) {
+      logger.error('❌ Error buscando fixtures:', error);
       throw error;
     }
   }
