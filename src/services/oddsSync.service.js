@@ -6,13 +6,13 @@ const logger = require('../utils/logger');
 
 class OddsSyncService {
   constructor() {
-    // 📊 MAPEO COMPLETO DE MERCADOS API-Football → Nuestros mercados
+    // 📊 MAPEO COMPLETO DE MERCADOS BASADO EN TU ids.json (SIN HANDICAPS)
     this.marketMapping = {
       // ═══════════════════════════════════════════════════════════════════
-      // MERCADOS PRINCIPALES - RESULTADO
+      // MERCADOS PRINCIPALES - RESULTADO DEL PARTIDO
       // ═══════════════════════════════════════════════════════════════════
       
-      // 1X2 (Match Winner)
+      // ID 1: Match Winner (1X2)
       1: {
         ourKey: '1X2',
         name: 'Match Winner',
@@ -23,14 +23,24 @@ class OddsSyncService {
         }
       },
       
-      // Double Chance
-      9: {
+      // ID 2: Home/Away (sin empate)
+      2: {
+        ourKey: 'HOME_AWAY',
+        name: 'Home/Away',
+        outcomes: {
+          'Home': 'HOME',
+          'Away': 'AWAY'
+        }
+      },
+
+      // ID 12: Double Chance
+      12: {
         ourKey: 'DOUBLE_CHANCE',
         name: 'Double Chance',
         outcomes: {
-          'Home/Draw': '1X',
-          'Home/Away': '12',
-          'Draw/Away': 'X2'
+          '1X': '1X',
+          'X2': 'X2', 
+          '12': '12'
         }
       },
 
@@ -38,82 +48,43 @@ class OddsSyncService {
       // MERCADOS DE GOLES - TIEMPO COMPLETO
       // ═══════════════════════════════════════════════════════════════════
       
-      // Over/Under 0.5 Goals
-      4: {
-        ourKey: 'OVER_UNDER_0_5',
-        name: 'Over/Under 0.5 Goals',
-        outcomes: {
-          'Over': 'OVER',
-          'Under': 'UNDER'
-        }
-      },
-      
-      // Over/Under 1.5 Goals
-      6: {
-        ourKey: 'OVER_UNDER_1_5',
-        name: 'Over/Under 1.5 Goals',
-        outcomes: {
-          'Over': 'OVER',
-          'Under': 'UNDER'
-        }
-      },
-      
-      // Over/Under 2.5 Goals
+      // ID 5: Goals Over/Under (Principal 2.5)
       5: {
         ourKey: 'OVER_UNDER_2_5',
-        name: 'Over/Under 2.5 Goals',
-        outcomes: {
-          'Over': 'OVER',
-          'Under': 'UNDER'
-        }
-      },
-      
-      // Over/Under 3.5 Goals
-      7: {
-        ourKey: 'OVER_UNDER_3_5',
-        name: 'Over/Under 3.5 Goals', 
+        name: 'Goals Over/Under',
         outcomes: {
           'Over': 'OVER',
           'Under': 'UNDER'
         }
       },
 
-      // Over/Under 4.5 Goals
-      10: {
-        ourKey: 'OVER_UNDER_4_5',
-        name: 'Over/Under 4.5 Goals',
+      // ID 38: Exact Goals Number
+      38: {
+        ourKey: 'EXACT_GOALS_NUMBER',
+        name: 'Exact Goals Number',
         outcomes: {
-          'Over': 'OVER',
-          'Under': 'UNDER'
+          '0': 'GOALS_0',
+          '1': 'GOALS_1',
+          '2': 'GOALS_2',
+          '3': 'GOALS_3',
+          '4': 'GOALS_4',
+          '5': 'GOALS_5',
+          '6+': 'GOALS_6_PLUS'
         }
       },
 
-      // Over/Under 5.5 Goals
-      11: {
-        ourKey: 'OVER_UNDER_5_5',
-        name: 'Over/Under 5.5 Goals',
-        outcomes: {
-          'Over': 'OVER',
-          'Under': 'UNDER'
-        }
-      },
-      
-      // Both Teams to Score
+      // ID 8: Both Teams Score
       8: {
         ourKey: 'BTTS',
-        name: 'Both Teams To Score',
+        name: 'Both Teams Score',
         outcomes: {
           'Yes': 'YES',
           'No': 'NO'
         }
       },
 
-      // ═══════════════════════════════════════════════════════════════════
-      // EXACT SCORE (Resultado Exacto)
-      // ═══════════════════════════════════════════════════════════════════
-      
-      // Exact Score
-      52: {
+      // ID 10: Exact Score
+      10: {
         ourKey: 'EXACT_SCORE',
         name: 'Exact Score',
         outcomes: {
@@ -146,14 +117,31 @@ class OddsSyncService {
         }
       },
 
+      // ID 47: Winning Margin
+      47: {
+        ourKey: 'WINNING_MARGIN',
+        name: 'Winning Margin',
+        outcomes: {
+          'Home 1': 'HOME_1',
+          'Home 2': 'HOME_2',
+          'Home 3': 'HOME_3',
+          'Home 4+': 'HOME_4_PLUS',
+          'Away 1': 'AWAY_1',
+          'Away 2': 'AWAY_2',
+          'Away 3': 'AWAY_3',
+          'Away 4+': 'AWAY_4_PLUS',
+          'Draw': 'DRAW'
+        }
+      },
+
       // ═══════════════════════════════════════════════════════════════════
       // PRIMER TIEMPO (HALFTIME)
       // ═══════════════════════════════════════════════════════════════════
       
-      // Halftime Result (1X2)
-      20: {
+      // ID 13: First Half Winner
+      13: {
         ourKey: 'HT_1X2',
-        name: 'Halftime Result',
+        name: 'First Half Winner',
         outcomes: {
           'Home': 'HOME',
           'Draw': 'DRAW',
@@ -161,51 +149,30 @@ class OddsSyncService {
         }
       },
 
-      // Halftime Double Chance
-      21: {
-        ourKey: 'HT_DOUBLE_CHANCE',
-        name: 'Halftime Double Chance',
-        outcomes: {
-          'Home/Draw': '1X',
-          'Home/Away': '12',
-          'Draw/Away': 'X2'
-        }
-      },
-
-      // Halftime Over/Under 0.5
-      22: {
-        ourKey: 'HT_OVER_UNDER_0_5',
-        name: 'Halftime Over/Under 0.5',
-        outcomes: {
-          'Over': 'OVER',
-          'Under': 'UNDER'
-        }
-      },
-
-      // Halftime Over/Under 1.5
-      23: {
+      // ID 6: Goals Over/Under First Half
+      6: {
         ourKey: 'HT_OVER_UNDER_1_5',
-        name: 'Halftime Over/Under 1.5',
+        name: 'Goals Over/Under First Half',
         outcomes: {
           'Over': 'OVER',
           'Under': 'UNDER'
         }
       },
 
-      // Halftime Both Teams to Score
-      24: {
+      // ID 34: Both Teams Score - First Half
+      34: {
         ourKey: 'HT_BTTS',
-        name: 'Halftime Both Teams To Score',
+        name: 'Both Teams Score - First Half',
         outcomes: {
           'Yes': 'YES',
           'No': 'NO'
         }
       },
 
-      // Halftime Exact Score
-      25: {
+      // ID 31: Correct Score - First Half
+      31: {
         ourKey: 'HT_EXACT_SCORE',
-        name: 'Halftime Exact Score',
+        name: 'Correct Score - First Half',
         outcomes: {
           '0-0': '0_0',
           '1-0': '1_0',
@@ -220,12 +187,46 @@ class OddsSyncService {
         }
       },
 
+      // ID 20: Double Chance - First Half
+      20: {
+        ourKey: 'HT_DOUBLE_CHANCE',
+        name: 'Double Chance - First Half',
+        outcomes: {
+          '1X': '1X',
+          'X2': 'X2',
+          '12': '12'
+        }
+      },
+
+      // ID 46: Exact Goals Number - First Half
+      46: {
+        ourKey: 'HT_EXACT_GOALS',
+        name: 'Exact Goals Number - First Half',
+        outcomes: {
+          '0': 'GOALS_0',
+          '1': 'GOALS_1',
+          '2': 'GOALS_2',
+          '3': 'GOALS_3',
+          '4+': 'GOALS_4_PLUS'
+        }
+      },
+
+      // ID 22: Odd/Even - First Half
+      22: {
+        ourKey: 'HT_ODD_EVEN',
+        name: 'Odd/Even - First Half',
+        outcomes: {
+          'Odd': 'ODD',
+          'Even': 'EVEN'
+        }
+      },
+
       // ═══════════════════════════════════════════════════════════════════
       // SEGUNDO TIEMPO
       // ═══════════════════════════════════════════════════════════════════
 
-      // Second Half Winner
-      26: {
+      // ID 3: Second Half Winner
+      3: {
         ourKey: 'ST_1X2',
         name: 'Second Half Winner',
         outcomes: {
@@ -235,94 +236,93 @@ class OddsSyncService {
         }
       },
 
-      // Second Half Over/Under 0.5
-      27: {
-        ourKey: 'ST_OVER_UNDER_0_5',
-        name: 'Second Half Over/Under 0.5',
-        outcomes: {
-          'Over': 'OVER',
-          'Under': 'UNDER'
-        }
-      },
-
-      // Second Half Over/Under 1.5
-      28: {
+      // ID 26: Goals Over/Under - Second Half
+      26: {
         ourKey: 'ST_OVER_UNDER_1_5',
-        name: 'Second Half Over/Under 1.5',
+        name: 'Goals Over/Under - Second Half',
         outcomes: {
           'Over': 'OVER',
           'Under': 'UNDER'
         }
       },
 
-      // Second Half Both Teams to Score
-      29: {
+      // ID 35: Both Teams To Score - Second Half
+      35: {
         ourKey: 'ST_BTTS',
-        name: 'Second Half Both Teams To Score',
+        name: 'Both Teams To Score - Second Half',
         outcomes: {
           'Yes': 'YES',
           'No': 'NO'
         }
       },
 
+      // ID 33: Double Chance - Second Half
+      33: {
+        ourKey: 'ST_DOUBLE_CHANCE',
+        name: 'Double Chance - Second Half',
+        outcomes: {
+          '1X': '1X',
+          'X2': 'X2',
+          '12': '12'
+        }
+      },
+
+      // ID 62: Correct Score - Second Half
+      62: {
+        ourKey: 'ST_EXACT_SCORE',
+        name: 'Correct Score - Second Half',
+        outcomes: {
+          '0-0': '0_0',
+          '1-0': '1_0',
+          '0-1': '0_1',
+          '1-1': '1_1',
+          '2-0': '2_0',
+          '0-2': '0_2',
+          'Other': 'OTHER'
+        }
+      },
+
+      // ID 42: Second Half Exact Goals Number
+      42: {
+        ourKey: 'ST_EXACT_GOALS',
+        name: 'Second Half Exact Goals Number',
+        outcomes: {
+          '0': 'GOALS_0',
+          '1': 'GOALS_1',
+          '2': 'GOALS_2',
+          '3': 'GOALS_3',
+          '4+': 'GOALS_4_PLUS'
+        }
+      },
+
+      // ID 63: Odd/Even - Second Half
+      63: {
+        ourKey: 'ST_ODD_EVEN',
+        name: 'Odd/Even - Second Half',
+        outcomes: {
+          'Odd': 'ODD',
+          'Even': 'EVEN'
+        }
+      },
+
       // ═══════════════════════════════════════════════════════════════════
-      // CORNERS (Esquinas)
+      // CORNERS (ESQUINAS)
       // ═══════════════════════════════════════════════════════════════════
       
-      // Total Corners Over/Under 7.5
-      30: {
-        ourKey: 'CORNERS_OVER_UNDER_7_5',
-        name: 'Corners Over/Under 7.5',
-        outcomes: {
-          'Over': 'OVER',
-          'Under': 'UNDER'
-        }
-      },
-
-      // Total Corners Over/Under 8.5
-      31: {
+      // ID 45: Corners Over Under
+      45: {
         ourKey: 'CORNERS_OVER_UNDER_8_5',
-        name: 'Corners Over/Under 8.5',
+        name: 'Corners Over Under',
         outcomes: {
           'Over': 'OVER',
           'Under': 'UNDER'
         }
       },
 
-      // Total Corners Over/Under 9.5
-      32: {
-        ourKey: 'CORNERS_OVER_UNDER_9_5',
-        name: 'Corners Over/Under 9.5',
-        outcomes: {
-          'Over': 'OVER',
-          'Under': 'UNDER'
-        }
-      },
-
-      // Total Corners Over/Under 10.5
-      33: {
-        ourKey: 'CORNERS_OVER_UNDER_10_5',
-        name: 'Corners Over/Under 10.5',
-        outcomes: {
-          'Over': 'OVER',
-          'Under': 'UNDER'
-        }
-      },
-
-      // Total Corners Over/Under 11.5
-      34: {
-        ourKey: 'CORNERS_OVER_UNDER_11_5',
-        name: 'Corners Over/Under 11.5',
-        outcomes: {
-          'Over': 'OVER',
-          'Under': 'UNDER'
-        }
-      },
-
-      // Corner 1X2 (Quién gana más corners)
-      35: {
+      // ID 55: Corners 1x2
+      55: {
         ourKey: 'CORNERS_1X2',
-        name: 'Corners 1X2',
+        name: 'Corners 1x2',
         outcomes: {
           'Home': 'HOME',
           'Draw': 'DRAW',
@@ -330,10 +330,41 @@ class OddsSyncService {
         }
       },
 
-      // First Half Corners
-      36: {
-        ourKey: 'HT_CORNERS_OVER_UNDER_3_5',
-        name: 'First Half Corners Over/Under 3.5',
+      // ID 57: Home Corners Over/Under
+      57: {
+        ourKey: 'HOME_CORNERS_OVER_UNDER',
+        name: 'Home Corners Over/Under',
+        outcomes: {
+          'Over': 'OVER',
+          'Under': 'UNDER'
+        }
+      },
+
+      // ID 58: Away Corners Over/Under
+      58: {
+        ourKey: 'AWAY_CORNERS_OVER_UNDER',
+        name: 'Away Corners Over/Under',
+        outcomes: {
+          'Over': 'OVER',
+          'Under': 'UNDER'
+        }
+      },
+
+      // ID 85: Total Corners (3 way)
+      85: {
+        ourKey: 'TOTAL_CORNERS_3WAY',
+        name: 'Total Corners (3 way)',
+        outcomes: {
+          'Under': 'UNDER',
+          'Exact': 'EXACT',
+          'Over': 'OVER'
+        }
+      },
+
+      // ID 77: Total Corners (1st Half)
+      77: {
+        ourKey: 'HT_TOTAL_CORNERS',
+        name: 'Total Corners (1st Half)',
         outcomes: {
           'Over': 'OVER',
           'Under': 'UNDER'
@@ -341,61 +372,71 @@ class OddsSyncService {
       },
 
       // ═══════════════════════════════════════════════════════════════════
-      // CARDS (Tarjetas)
+      // TARJETAS (CARDS)
       // ═══════════════════════════════════════════════════════════════════
       
-      // Total Cards Over/Under 2.5
-      37: {
-        ourKey: 'CARDS_OVER_UNDER_2_5',
-        name: 'Cards Over/Under 2.5',
-        outcomes: {
-          'Over': 'OVER',
-          'Under': 'UNDER'
-        }
-      },
-
-      // Total Cards Over/Under 3.5
-      38: {
+      // ID 80: Cards Over/Under
+      80: {
         ourKey: 'CARDS_OVER_UNDER_3_5',
-        name: 'Cards Over/Under 3.5',
+        name: 'Cards Over/Under',
         outcomes: {
           'Over': 'OVER',
           'Under': 'UNDER'
         }
       },
 
-      // Total Cards Over/Under 4.5
-      39: {
-        ourKey: 'CARDS_OVER_UNDER_4_5',
-        name: 'Cards Over/Under 4.5',
+      // ID 82: Home Team Total Cards
+      82: {
+        ourKey: 'HOME_TEAM_CARDS',
+        name: 'Home Team Total Cards',
         outcomes: {
           'Over': 'OVER',
           'Under': 'UNDER'
         }
       },
 
-      // Total Cards Over/Under 5.5
-      40: {
-        ourKey: 'CARDS_OVER_UNDER_5_5',
-        name: 'Cards Over/Under 5.5',
+      // ID 83: Away Team Total Cards
+      83: {
+        ourKey: 'AWAY_TEAM_CARDS',
+        name: 'Away Team Total Cards',
         outcomes: {
           'Over': 'OVER',
           'Under': 'UNDER'
         }
       },
 
-      // Total Cards Over/Under 6.5
-      41: {
-        ourKey: 'CARDS_OVER_UNDER_6_5',
-        name: 'Cards Over/Under 6.5',
+      // ID 150: Home Team Yellow Cards
+      150: {
+        ourKey: 'HOME_YELLOW_CARDS',
+        name: 'Home Team Yellow Cards',
         outcomes: {
           'Over': 'OVER',
           'Under': 'UNDER'
         }
       },
 
-      // Red Card (Tarjeta Roja)
-      42: {
+      // ID 151: Away Team Yellow Cards
+      151: {
+        ourKey: 'AWAY_YELLOW_CARDS',
+        name: 'Away Team Yellow Cards',
+        outcomes: {
+          'Over': 'OVER',
+          'Under': 'UNDER'
+        }
+      },
+
+      // ID 153: Yellow Over/Under
+      153: {
+        ourKey: 'YELLOW_CARDS_TOTAL',
+        name: 'Yellow Over/Under',
+        outcomes: {
+          'Over': 'OVER',
+          'Under': 'UNDER'
+        }
+      },
+
+      // ID 86: Red Card
+      86: {
         ourKey: 'RED_CARD',
         name: 'Red Card',
         outcomes: {
@@ -404,33 +445,137 @@ class OddsSyncService {
         }
       },
 
-      // Both Teams Cards
-      43: {
-        ourKey: 'BOTH_TEAMS_CARDS',
-        name: 'Both Teams To Get Cards',
+      // ═══════════════════════════════════════════════════════════════════
+      // MERCADOS ESPECIALES
+      // ═══════════════════════════════════════════════════════════════════
+
+      // ID 21: Odd/Even
+      21: {
+        ourKey: 'ODD_EVEN',
+        name: 'Odd/Even',
+        outcomes: {
+          'Odd': 'ODD',
+          'Even': 'EVEN'
+        }
+      },
+
+      // ID 23: Home Odd/Even
+      23: {
+        ourKey: 'HOME_ODD_EVEN',
+        name: 'Home Odd/Even',
+        outcomes: {
+          'Odd': 'ODD',
+          'Even': 'EVEN'
+        }
+      },
+
+      // ID 60: Away Odd/Even
+      60: {
+        ourKey: 'AWAY_ODD_EVEN',
+        name: 'Away Odd/Even',
+        outcomes: {
+          'Odd': 'ODD',
+          'Even': 'EVEN'
+        }
+      },
+
+      // ID 14: Team To Score First
+      14: {
+        ourKey: 'FIRST_GOAL',
+        name: 'Team To Score First',
+        outcomes: {
+          'Home': 'HOME',
+          'Away': 'AWAY'
+        }
+      },
+
+      // ID 15: Team To Score Last
+      15: {
+        ourKey: 'LAST_GOAL',
+        name: 'Team To Score Last',
+        outcomes: {
+          'Home': 'HOME',
+          'Away': 'AWAY'
+        }
+      },
+
+      // ID 27: Clean Sheet - Home
+      27: {
+        ourKey: 'HOME_CLEAN_SHEET',
+        name: 'Clean Sheet - Home',
         outcomes: {
           'Yes': 'YES',
           'No': 'NO'
         }
       },
 
-      // Home Team Cards Over/Under 1.5
-      44: {
-        ourKey: 'HOME_CARDS_OVER_UNDER_1_5',
-        name: 'Home Team Cards Over/Under 1.5',
+      // ID 28: Clean Sheet - Away
+      28: {
+        ourKey: 'AWAY_CLEAN_SHEET',
+        name: 'Clean Sheet - Away',
         outcomes: {
-          'Over': 'OVER',
-          'Under': 'UNDER'
+          'Yes': 'YES',
+          'No': 'NO'
         }
       },
 
-      // Away Team Cards Over/Under 1.5
-      45: {
-        ourKey: 'AWAY_CARDS_OVER_UNDER_1_5',
-        name: 'Away Team Cards Over/Under 1.5',
+      // ID 29: Win to Nil - Home
+      29: {
+        ourKey: 'HOME_WIN_TO_NIL',
+        name: 'Win to Nil - Home',
         outcomes: {
-          'Over': 'OVER',
-          'Under': 'UNDER'
+          'Yes': 'YES',
+          'No': 'NO'
+        }
+      },
+
+      // ID 30: Win to Nil - Away
+      30: {
+        ourKey: 'AWAY_WIN_TO_NIL',
+        name: 'Win to Nil - Away',
+        outcomes: {
+          'Yes': 'YES',
+          'No': 'NO'
+        }
+      },
+
+      // ID 36: Win To Nil
+      36: {
+        ourKey: 'WIN_TO_NIL',
+        name: 'Win To Nil',
+        outcomes: {
+          'Home': 'HOME',
+          'Away': 'AWAY'
+        }
+      },
+
+      // ID 43: Home Team Score a Goal
+      43: {
+        ourKey: 'HOME_TEAM_SCORE',
+        name: 'Home Team Score a Goal',
+        outcomes: {
+          'Yes': 'YES',
+          'No': 'NO'
+        }
+      },
+
+      // ID 44: Away Team Score a Goal
+      44: {
+        ourKey: 'AWAY_TEAM_SCORE',
+        name: 'Away Team Score a Goal',
+        outcomes: {
+          'Yes': 'YES',
+          'No': 'NO'
+        }
+      },
+
+      // ID 59: Own Goal
+      59: {
+        ourKey: 'OWN_GOAL',
+        name: 'Own Goal',
+        outcomes: {
+          'Yes': 'YES',
+          'No': 'NO'
         }
       },
 
@@ -438,24 +583,10 @@ class OddsSyncService {
       // MERCADOS COMBINADOS
       // ═══════════════════════════════════════════════════════════════════
 
-      // Full Time Result/Both Teams to Score
-      46: {
-        ourKey: 'FT_BTTS_COMBO',
-        name: 'Full Time Result/Both Teams to Score',
-        outcomes: {
-          'Home/Yes': 'HOME_YES',
-          'Home/No': 'HOME_NO',
-          'Draw/Yes': 'DRAW_YES',
-          'Draw/No': 'DRAW_NO',
-          'Away/Yes': 'AWAY_YES',
-          'Away/No': 'AWAY_NO'
-        }
-      },
-
-      // Halftime/Fulltime
-      47: {
+      // ID 7: HT/FT Double
+      7: {
         ourKey: 'HT_FT',
-        name: 'Halftime/Fulltime',
+        name: 'HT/FT Double',
         outcomes: {
           'Home/Home': 'HOME_HOME',
           'Home/Draw': 'HOME_DRAW',
@@ -469,47 +600,300 @@ class OddsSyncService {
         }
       },
 
-      // ═══════════════════════════════════════════════════════════════════
-      // MERCADOS ESPECIALES
-      // ═══════════════════════════════════════════════════════════════════
-
-      // To Win to Nil (Ganar sin recibir goles)
-      48: {
-        ourKey: 'WIN_TO_NIL',
-        name: 'To Win To Nil',
+      // ID 24: Results/Both Teams Score
+      24: {
+        ourKey: 'RESULT_BTTS',
+        name: 'Results/Both Teams Score',
         outcomes: {
-          'Home': 'HOME',
-          'Away': 'AWAY'
+          'Home/Yes': 'HOME_YES',
+          'Home/No': 'HOME_NO',
+          'Draw/Yes': 'DRAW_YES',
+          'Draw/No': 'DRAW_NO',
+          'Away/Yes': 'AWAY_YES',
+          'Away/No': 'AWAY_NO'
         }
       },
 
-      // To Score First
+      // ID 25: Result/Total Goals
+      25: {
+        ourKey: 'RESULT_TOTAL_GOALS',
+        name: 'Result/Total Goals',
+        outcomes: {
+          'Home/Over': 'HOME_OVER',
+          'Home/Under': 'HOME_UNDER',
+          'Draw/Over': 'DRAW_OVER',
+          'Draw/Under': 'DRAW_UNDER',
+          'Away/Over': 'AWAY_OVER',
+          'Away/Under': 'AWAY_UNDER'
+        }
+      },
+
+      // ID 49: Total Goals/Both Teams To Score
       49: {
-        ourKey: 'FIRST_GOAL',
-        name: 'To Score First',
+        ourKey: 'TOTAL_GOALS_BTTS',
+        name: 'Total Goals/Both Teams To Score',
+        outcomes: {
+          'Over/Yes': 'OVER_YES',
+          'Over/No': 'OVER_NO',
+          'Under/Yes': 'UNDER_YES',
+          'Under/No': 'UNDER_NO'
+        }
+      },
+
+      // ═══════════════════════════════════════════════════════════════════
+      // MERCADOS DE TIEMPO ESPECÍFICO
+      // ═══════════════════════════════════════════════════════════════════
+
+      // ID 54: First 10 min Winner
+      54: {
+        ourKey: 'FIRST_10_MIN_WINNER',
+        name: 'First 10 min Winner',
         outcomes: {
           'Home': 'HOME',
+          'Draw': 'DRAW',
           'Away': 'AWAY'
         }
       },
 
-      // To Score Last
-      50: {
-        ourKey: 'LAST_GOAL',
-        name: 'To Score Last',
+      // ID 136: 1x2 - 15 minutes
+      136: {
+        ourKey: '1X2_15_MIN',
+        name: '1x2 - 15 minutes',
         outcomes: {
           'Home': 'HOME',
+          'Draw': 'DRAW',
           'Away': 'AWAY'
         }
       },
 
-      // Clean Sheet
-      51: {
-        ourKey: 'CLEAN_SHEET',
-        name: 'Clean Sheet',
+      // ID 139: 1x2 - 30 minutes
+      139: {
+        ourKey: '1X2_30_MIN',
+        name: '1x2 - 30 minutes',
+        outcomes: {
+          'Home': 'HOME',
+          'Draw': 'DRAW',
+          'Away': 'AWAY'
+        }
+      },
+
+      // ID 137: 1x2 - 60 minutes
+      137: {
+        ourKey: '1X2_60_MIN',
+        name: '1x2 - 60 minutes',
+        outcomes: {
+          'Home': 'HOME',
+          'Draw': 'DRAW',
+          'Away': 'AWAY'
+        }
+      },
+
+      // ID 138: 1x2 - 75 minutes
+      138: {
+        ourKey: '1X2_75_MIN',
+        name: '1x2 - 75 minutes',
+        outcomes: {
+          'Home': 'HOME',
+          'Draw': 'DRAW',
+          'Away': 'AWAY'
+        }
+      },
+
+      // ═══════════════════════════════════════════════════════════════════
+      // MERCADOS DE GOLES POR EQUIPO
+      // ═══════════════════════════════════════════════════════════════════
+
+      // ID 16: Total - Home
+      16: {
+        ourKey: 'HOME_TOTAL_GOALS',
+        name: 'Total - Home',
+        outcomes: {
+          'Over': 'OVER',
+          'Under': 'UNDER'
+        }
+      },
+
+      // ID 17: Total - Away
+      17: {
+        ourKey: 'AWAY_TOTAL_GOALS',
+        name: 'Total - Away',
+        outcomes: {
+          'Over': 'OVER',
+          'Under': 'UNDER'
+        }
+      },
+
+      // ID 40: Home Team Exact Goals Number
+      40: {
+        ourKey: 'HOME_EXACT_GOALS',
+        name: 'Home Team Exact Goals Number',
+        outcomes: {
+          '0': 'GOALS_0',
+          '1': 'GOALS_1',
+          '2': 'GOALS_2',
+          '3': 'GOALS_3',
+          '4+': 'GOALS_4_PLUS'
+        }
+      },
+
+      // ID 41: Away Team Exact Goals Number
+      41: {
+        ourKey: 'AWAY_EXACT_GOALS',
+        name: 'Away Team Exact Goals Number',
+        outcomes: {
+          '0': 'GOALS_0',
+          '1': 'GOALS_1',
+          '2': 'GOALS_2',
+          '3': 'GOALS_3',
+          '4+': 'GOALS_4_PLUS'
+        }
+      },
+
+      // ID 105: Home Team Total Goals(1st Half)
+      105: {
+        ourKey: 'HOME_HT_TOTAL_GOALS',
+        name: 'Home Team Total Goals(1st Half)',
+        outcomes: {
+          'Over': 'OVER',
+          'Under': 'UNDER'
+        }
+      },
+
+      // ID 106: Away Team Total Goals(1st Half)
+      106: {
+        ourKey: 'AWAY_HT_TOTAL_GOALS',
+        name: 'Away Team Total Goals(1st Half)',
+        outcomes: {
+          'Over': 'OVER',
+          'Under': 'UNDER'
+        }
+      },
+
+      // ID 107: Home Team Total Goals(2nd Half)
+      107: {
+        ourKey: 'HOME_ST_TOTAL_GOALS',
+        name: 'Home Team Total Goals(2nd Half)',
+        outcomes: {
+          'Over': 'OVER',
+          'Under': 'UNDER'
+        }
+      },
+
+      // ID 108: Away Team Total Goals(2nd Half)
+      108: {
+        ourKey: 'AWAY_ST_TOTAL_GOALS',
+        name: 'Away Team Total Goals(2nd Half)',
+        outcomes: {
+          'Over': 'OVER',
+          'Under': 'UNDER'
+        }
+      },
+
+      // ═══════════════════════════════════════════════════════════════════
+      // MERCADOS ESPECIALES AVANZADOS
+      // ═══════════════════════════════════════════════════════════════════
+
+      // ID 32: Win Both Halves
+      32: {
+        ourKey: 'WIN_BOTH_HALVES',
+        name: 'Win Both Halves',
         outcomes: {
           'Home': 'HOME',
           'Away': 'AWAY',
+          'Neither': 'NEITHER'
+        }
+      },
+
+      // ID 37: Home win both halves
+      37: {
+        ourKey: 'HOME_WIN_BOTH_HALVES',
+        name: 'Home win both halves',
+        outcomes: {
+          'Yes': 'YES',
+          'No': 'NO'
+        }
+      },
+
+      // ID 53: Away win both halves
+      53: {
+        ourKey: 'AWAY_WIN_BOTH_HALVES',
+        name: 'Away win both halves',
+        outcomes: {
+          'Yes': 'YES',
+          'No': 'NO'
+        }
+      },
+
+      // ID 39: To Win Either Half
+      39: {
+        ourKey: 'WIN_EITHER_HALF',
+        name: 'To Win Either Half',
+        outcomes: {
+          'Home': 'HOME',
+          'Away': 'AWAY'
+        }
+      },
+
+      // ID 48: To Score In Both Halves By Teams
+      48: {
+        ourKey: 'SCORE_BOTH_HALVES',
+        name: 'To Score In Both Halves By Teams',
+        outcomes: {
+          'Home': 'HOME',
+          'Away': 'AWAY',
+          'Both': 'BOTH',
+          'Neither': 'NEITHER'
+        }
+      },
+
+      // ID 111: Home team will score in both halves
+      111: {
+        ourKey: 'HOME_SCORE_BOTH_HALVES',
+        name: 'Home team will score in both halves',
+        outcomes: {
+          'Yes': 'YES',
+          'No': 'NO'
+        }
+      },
+
+      // ID 112: Away team will score in both halves
+      112: {
+        ourKey: 'AWAY_SCORE_BOTH_HALVES',
+        name: 'Away team will score in both halves',
+        outcomes: {
+          'Yes': 'YES',
+          'No': 'NO'
+        }
+      },
+
+      // ID 113: Both Teams To Score in Both Halves
+      113: {
+        ourKey: 'BTTS_BOTH_HALVES',
+        name: 'Both Teams To Score in Both Halves',
+        outcomes: {
+          'Yes': 'YES',
+          'No': 'NO'
+        }
+      },
+
+      // ID 110: Scoring Draw
+      110: {
+        ourKey: 'SCORING_DRAW',
+        name: 'Scoring Draw',
+        outcomes: {
+          'Yes': 'YES',
+          'No': 'NO'
+        }
+      },
+
+      // ID 184: To Score in Both Halves
+      184: {
+        ourKey: 'TEAM_SCORE_BOTH_HALVES',
+        name: 'To Score in Both Halves',
+        outcomes: {
+          'Home': 'HOME',
+          'Away': 'AWAY',
+          'Both': 'BOTH',
           'Neither': 'NEITHER'
         }
       }
@@ -523,7 +907,9 @@ class OddsSyncService {
       'Unibet',
       'Pinnacle',
       'Betway',
-      '1xBet'
+      '1xBet',
+      'PokerStars',
+      'Bwin'
     ];
   }
 
@@ -564,8 +950,8 @@ class OddsSyncService {
                 bet
               );
               
-              if (processResult.created) results.created++;
-              else if (processResult.updated) results.updated++;
+              if (processResult.created) results.created += processResult.created;
+              if (processResult.updated) results.updated += processResult.updated;
               
               results.markets++;
             }
