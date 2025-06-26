@@ -913,7 +913,7 @@ class OddsSyncService {
     ];
   }
 
-  // 📊 SINCRONIZAR ODDS DE UN FIXTURE
+  // 📊 SINCRONIZAR ODDS DE UN FIXTURE - ✅ CORREGIDO PARA OBTENER TODAS LAS ODDS
   async syncFixtureOdds(fixtureApiId) {
     try {
       logger.info(`📊 Sincronizando odds para fixture ${fixtureApiId}...`);
@@ -928,21 +928,64 @@ class OddsSyncService {
         throw new Error(`Fixture ${fixtureApiId} no encontrado en BD`);
       }
 
-      // Obtener odds de API-Football
+      // ✅ OBTENER TODAS LAS ODDS SIN LIMITAR BOOKMAKER
+      logger.info(`📡 Solicitando TODAS las odds de API-Football para fixture ${fixtureApiId}...`);
+      
       const response = await apiFootballService.makeRequest('/odds', {
         fixture: fixtureApiId
+        // ✅ NO especificar bookmaker = obtiene TODAS las casas de apuestas
       });
 
-      if (!response.response || response.response.length === 0) {
-        logger.warn(`No hay odds disponibles para fixture ${fixtureApiId}`);
-        return { created: 0, updated: 0, errors: 0 };
+      // ✅ DEBUG: Log detallado de la respuesta
+      if (response.response && response.response.length > 0) {
+        const oddsData = response.response[0];
+        logger.info(`📊 ✅ RESPUESTA EXITOSA de API-Football:
+          🎯 Fixture: ${oddsData.fixture.id}
+          🏆 Liga: ${oddsData.league.name}
+          📅 Fecha: ${oddsData.fixture.date}
+          🎲 Total bookmakers: ${oddsData.bookmakers.length}
+          📋 Bookmakers: ${oddsData.bookmakers.map(b => `${b.name}(ID:${b.id})`).join(', ')}`);
+        
+        // Log de mercados de los primeros bookmakers como ejemplo
+        if (oddsData.bookmakers[0]) {
+          const firstBookmaker = oddsData.bookmakers[0];
+          logger.info(`📈 Ejemplo - ${firstBookmaker.name} tiene ${firstBookmaker.bets.length} mercados:
+            ${firstBookmaker.bets.map(bet => `${bet.name}(ID:${bet.id})`).slice(0, 5).join(', ')}${firstBookmaker.bets.length > 5 ? '...' : ''}`);
+        }
+
+        if (oddsData.bookmakers.length > 1 && oddsData.bookmakers[1]) {
+          const secondBookmaker = oddsData.bookmakers[1];
+          logger.info(`📈 Ejemplo 2 - ${secondBookmaker.name} tiene ${secondBookmaker.bets.length} mercados`);
+        }
+      } else {
+        logger.warn(`⚠️ ❌ NO SE RECIBIERON ODDS de API-Football para fixture ${fixtureApiId}`);
+        logger.warn(`📄 Respuesta API completa:`, JSON.stringify(response, null, 2));
+        
+        // Verificar si es problema de rate limit o fixture inexistente
+        if (response.errors && response.errors.length > 0) {
+          logger.error(`🚨 ERRORES DE API-Football:`, response.errors);
+        }
+        
+        // Verificar rate limit info
+        if (response.paging) {
+          logger.info(`📊 Rate limit info - Current: ${response.paging.current}, Total: ${response.paging.total}`);
+        }
       }
 
-      const results = { created: 0, updated: 0, errors: 0, markets: 0 };
+      if (!response.response || response.response.length === 0) {
+        logger.warn(`❌ No hay odds disponibles para fixture ${fixtureApiId}`);
+        return { created: 0, updated: 0, errors: 0, message: 'No odds available' };
+      }
+
+      const results = { created: 0, updated: 0, errors: 0, markets: 0, bookmakers: 0 };
 
       for (const oddsData of response.response) {
+        results.bookmakers += oddsData.bookmakers.length;
+        
         try {
           for (const bookmaker of oddsData.bookmakers) {
+            logger.debug(`🏪 Procesando bookmaker: ${bookmaker.name} (${bookmaker.bets.length} mercados)`);
+            
             for (const bet of bookmaker.bets) {
               const processResult = await this.processOddsData(
                 fixture.id,
@@ -952,24 +995,50 @@ class OddsSyncService {
               
               if (processResult.created) results.created += processResult.created;
               if (processResult.updated) results.updated += processResult.updated;
+              if (processResult.errors) results.errors += processResult.errors;
               
               results.markets++;
             }
           }
         } catch (error) {
-          logger.error(`Error procesando odds:`, error.message);
+          logger.error(`❌ Error procesando odds de bookmaker:`, error.message);
           results.errors++;
         }
       }
 
       // Calcular odds promedio
+      logger.info(`🧮 Calculando odds promedio para fixture ${fixture.id}...`);
       await this.calculateAverageOdds(fixture.id);
 
-      logger.info(`✅ Odds sincronizados para ${fixture.homeTeam.name} vs ${fixture.awayTeam.name}: ${results.created + results.updated} odds`);
+      const successMessage = `✅ ODDS SINCRONIZADOS EXITOSAMENTE para ${fixture.homeTeam.name} vs ${fixture.awayTeam.name}:
+        🎲 ${results.bookmakers} bookmakers procesados
+        📈 ${results.created + results.updated} odds guardadas (${results.created} nuevas, ${results.updated} actualizadas)
+        🎯 ${results.markets} mercados procesados
+        ❌ ${results.errors} errores`;
+      
+      logger.info(successMessage);
       return results;
 
     } catch (error) {
-      logger.error(`❌ Error sincronizando odds para fixture ${fixtureApiId}:`, error);
+      logger.error(`❌ ERROR CRÍTICO sincronizando odds para fixture ${fixtureApiId}:`, error);
+      
+      // ✅ DEBUG: Información adicional del error
+      if (error.message.includes('Rate limit') || error.message.includes('429')) {
+        logger.error('🚨 RATE LIMIT ALCANZADO - Verifica tu plan de API-Football');
+        logger.error('💡 Solución: Espera o actualiza tu plan en RapidAPI');
+      } else if (error.message.includes('Not Found') || error.message.includes('404')) {
+        logger.error('🔍 FIXTURE NO ENCONTRADO en API-Football - Verifica el ID del fixture');
+        logger.error(`💡 Solución: Verifica que el fixture ${fixtureApiId} existe en API-Football`);
+      } else if (error.message.includes('Unauthorized') || error.message.includes('401')) {
+        logger.error('🔑 ERROR DE AUTENTICACIÓN - Verifica tu API_FOOTBALL_KEY');
+        logger.error('💡 Solución: Revisa tu API key en el archivo .env');
+      } else if (error.message.includes('ECONNREFUSED')) {
+        logger.error('🌐 ERROR DE CONEXIÓN - Verifica tu conexión a internet');
+      } else {
+        logger.error(`🔧 Error desconocido: ${error.message}`);
+        logger.error('📄 Stack trace:', error.stack);
+      }
+      
       throw error;
     }
   }
@@ -981,7 +1050,7 @@ class OddsSyncService {
       
       if (!marketMapping) {
         // Mercado no soportado - log para debug
-        logger.debug(`Mercado no soportado: ${betData.id} - ${betData.name}`);
+        logger.debug(`⚠️ Mercado no soportado: ${betData.id} - ${betData.name}`);
         return { skipped: true };
       }
 
@@ -991,58 +1060,64 @@ class OddsSyncService {
       });
 
       if (!market) {
-        logger.warn(`Mercado ${marketMapping.ourKey} no encontrado en BD`);
-        return { skipped: true };
+        logger.warn(`❌ Mercado ${marketMapping.ourKey} no encontrado en BD`);
+        return { skipped: true, message: `Market ${marketMapping.ourKey} not found` };
       }
 
-      const results = { created: 0, updated: 0 };
+      const results = { created: 0, updated: 0, errors: 0 };
 
       // Procesar cada valor de odds
       for (const value of betData.values) {
         const outcome = marketMapping.outcomes[value.value];
         
         if (!outcome) {
-          logger.debug(`Outcome no mapeado: ${value.value} en mercado ${marketMapping.ourKey}`);
+          logger.debug(`⚠️ Outcome no mapeado: ${value.value} en mercado ${marketMapping.ourKey}`);
           continue;
         }
 
-        // Datos de la odd
-        const oddData = {
-          fixtureId,
-          marketId: market.id,
-          bookmaker: bookmakerName,
-          outcome,
-          value: this.extractNumericValue(value.value), // Extraer valor numérico si aplica
-          odds: parseFloat(value.odd),
-          impliedProbability: this.calculateImpliedProbability(parseFloat(value.odd)),
-          isActive: true,
-          lastUpdated: new Date()
-        };
-
-        // Crear o actualizar odd
-        const [odd, created] = await Odds.findOrCreate({
-          where: {
+        try {
+          // Datos de la odd
+          const oddData = {
             fixtureId,
             marketId: market.id,
+            bookmaker: bookmakerName,
             outcome,
-            bookmaker: bookmakerName
-          },
-          defaults: oddData
-        });
+            value: this.extractNumericValue(value.value), // Extraer valor numérico si aplica
+            odds: parseFloat(value.odd),
+            impliedProbability: this.calculateImpliedProbability(parseFloat(value.odd)),
+            isActive: true,
+            lastUpdated: new Date()
+          };
 
-        if (!created) {
-          await odd.update(oddData);
-          results.updated++;
-        } else {
-          results.created++;
+          // Crear o actualizar odd
+          const [odd, created] = await Odds.findOrCreate({
+            where: {
+              fixtureId,
+              marketId: market.id,
+              outcome,
+              bookmaker: bookmakerName
+            },
+            defaults: oddData
+          });
+
+          if (!created) {
+            await odd.update(oddData);
+            results.updated++;
+          } else {
+            results.created++;
+          }
+
+        } catch (oddError) {
+          logger.error(`❌ Error procesando odd individual: ${oddError.message}`);
+          results.errors++;
         }
       }
 
       return results;
 
     } catch (error) {
-      logger.error('Error procesando odd individual:', error);
-      throw error;
+      logger.error('❌ Error procesando odd individual:', error);
+      return { errors: 1, message: error.message };
     }
   }
 
@@ -1110,7 +1185,7 @@ class OddsSyncService {
       }
 
     } catch (error) {
-      logger.error('Error calculando odds promedio:', error);
+      logger.error('❌ Error calculando odds promedio:', error);
     }
   }
 
@@ -1141,31 +1216,48 @@ class OddsSyncService {
       });
 
       if (fixtures.length === 0) {
-        logger.info('No hay fixtures de ligas top para sincronizar odds hoy');
+        logger.info('ℹ️ No hay fixtures de ligas top para sincronizar odds hoy');
         return { totalFixtures: 0, totalOdds: 0 };
       }
+
+      logger.info(`📊 Encontrados ${fixtures.length} fixtures de ligas top para sincronizar`);
 
       const results = {
         totalFixtures: fixtures.length,
         totalOdds: 0,
-        errors: 0
+        errors: 0,
+        processed: 0
       };
 
       for (const fixture of fixtures) {
         try {
+          logger.info(`🔄 [${results.processed + 1}/${fixtures.length}] Procesando fixture: ${fixture.homeTeam?.name || 'Home'} vs ${fixture.awayTeam?.name || 'Away'}`);
+          
           // Pausa para rate limiting
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise(resolve => setTimeout(resolve, 2000)); // 2 segundos entre requests
           
           const oddsResult = await this.syncFixtureOdds(fixture.apiFootballId);
           results.totalOdds += oddsResult.created + oddsResult.updated;
+          results.processed++;
           
         } catch (error) {
-          logger.error(`Error sincronizando odds de fixture ${fixture.apiFootballId}:`, error.message);
+          logger.error(`❌ Error sincronizando odds de fixture ${fixture.apiFootballId}: ${error.message}`);
           results.errors++;
+          results.processed++;
+          
+          // Si es rate limit, detener el proceso
+          if (error.message.includes('Rate limit') || error.message.includes('429')) {
+            logger.error('🚨 RATE LIMIT ALCANZADO - Deteniendo sincronización');
+            break;
+          }
         }
       }
 
-      logger.info(`✅ Sincronización de odds completada: ${results.totalOdds} odds de ${results.totalFixtures} fixtures`);
+      const summaryMessage = `✅ SINCRONIZACIÓN DE ODDS COMPLETADA:
+        📊 ${results.totalOdds} odds de ${results.processed}/${results.totalFixtures} fixtures
+        ❌ ${results.errors} errores`;
+      
+      logger.info(summaryMessage);
       return results;
 
     } catch (error) {
@@ -1182,6 +1274,7 @@ class OddsSyncService {
       // Intentar obtener del cache
       const cached = await cacheService.get(cacheKey);
       if (cached) {
+        logger.debug(`📦 Cache hit para odds fixture ${fixtureId}`);
         return cached;
       }
 
@@ -1240,7 +1333,7 @@ class OddsSyncService {
       return result;
 
     } catch (error) {
-      logger.error(`Error obteniendo odds de fixture ${fixtureId}:`, error);
+      logger.error(`❌ Error obteniendo odds de fixture ${fixtureId}:`, error);
       throw error;
     }
   }
@@ -1318,7 +1411,7 @@ class OddsSyncService {
       return result;
 
     } catch (error) {
-      logger.error(`Error obteniendo mejores odds de fixture ${fixtureId}:`, error);
+      logger.error(`❌ Error obteniendo mejores odds de fixture ${fixtureId}:`, error);
       throw error;
     }
   }
@@ -1353,7 +1446,7 @@ class OddsSyncService {
       };
 
     } catch (error) {
-      logger.error('Error obteniendo estadísticas de odds:', error);
+      logger.error('❌ Error obteniendo estadísticas de odds:', error);
       throw error;
     }
   }
@@ -1381,7 +1474,7 @@ class OddsSyncService {
       }));
 
     } catch (error) {
-      logger.error('Error obteniendo mercados disponibles:', error);
+      logger.error('❌ Error obteniendo mercados disponibles:', error);
       return [];
     }
   }

@@ -120,12 +120,45 @@ class ApiFootballService {
     return await this.makeRequest('/fixtures', params);
   }
 
-  // Obtener cuotas de un fixture
-  async getFixtureOdds(fixtureId) {
+  // ✅ CORREGIDO: Obtener cuotas de un fixture (TODAS las casas de apuestas por defecto)
+  async getFixtureOdds(fixtureId, bookmaker = null) {
+    const params = { fixture: fixtureId };
+    
+    // Solo agregar bookmaker si se especifica uno en particular
+    if (bookmaker && bookmaker !== 'all') {
+      params.bookmaker = bookmaker;
+    }
+    
+    return await this.makeRequest('/odds', params);
+  }
+
+  // Método para obtener odds de un bookmaker específico
+  async getFixtureOddsByBookmaker(fixtureId, bookmakerId) {
     return await this.makeRequest('/odds', { 
       fixture: fixtureId,
-      bookmaker: '8' // Bet365 como referencia
+      bookmaker: bookmakerId
     });
+  }
+
+  // Obtener todas las odds disponibles para un fixture
+  async getAllFixtureOdds(fixtureId) {
+    return await this.makeRequest('/odds', { 
+      fixture: fixtureId
+      // Sin especificar bookmaker = obtiene todas las casas
+    });
+  }
+
+  // Obtener odds con filtros específicos
+  async getFixtureOddsWithFilters(fixtureId, options = {}) {
+    const params = { fixture: fixtureId };
+    
+    // Opciones disponibles según la documentación de API-Football
+    if (options.bookmaker) params.bookmaker = options.bookmaker;
+    if (options.bet) params.bet = options.bet;        // ID del tipo de apuesta
+    if (options.league) params.league = options.league;
+    if (options.season) params.season = options.season;
+    
+    return await this.makeRequest('/odds', params);
   }
 
   // Obtener tabla de posiciones
