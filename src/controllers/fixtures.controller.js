@@ -1,35 +1,73 @@
+// 📄 src/controllers/fixtures.controller.js - ULTRA SIMPLE SIN ERRORES
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 const fixtureSync = require('../services/fixtureSync.service');
 const apiFootballService = require('../services/apiFootballService');
 const { Fixture, League, Team } = require('../models');
 const logger = require('../utils/logger');
 
+// ✅ FUNCIÓN HELPER FUERA DE LA CLASE PARA EVITAR PROBLEMAS CON 'THIS'
+function formatDateForTimezone(date, timezone = 'America/Lima') {
+  try {
+    return new Intl.DateTimeFormat('es-PE', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).format(new Date(date));
+  } catch (error) {
+    logger.error(`❌ Error formateando fecha para timezone ${timezone}:`, error.message);
+    return new Date(date).toLocaleString('es-PE'); // Fallback simple
+  }
+}
+
 class FixturesController {
-  // GET /api/fixtures/today - Obtener partidos de hoy
+  // ✅ GET /api/fixtures/today - ULTRA SIMPLE
   async getTodayFixtures(req, res) {
     try {
-      logger.info('📅 Solicitud: Fixtures de hoy');
+      const timezone = req.query.timezone || 'America/Lima';
+      const minPriority = parseInt(req.query.minPriority) || 0;
 
-      // Primero intentar sincronizar datos frescos (si no ha sido hecho recientemente)
+      logger.info(`📅 Solicitud: Fixtures de hoy (timezone: ${timezone})`);
+
+      // Sincronizar datos
       try {
         await fixtureSync.syncTodayFixtures();
       } catch (syncError) {
-        logger.warn('⚠️ Error sincronizando datos frescos, usando datos locales:', syncError.message);
+        logger.warn('⚠️ Error sincronizando datos frescos:', syncError.message);
       }
 
-      // Obtener fixtures desde base de datos
-      const fixtures = await fixtureSync.getTodayFixtures();
+      // Obtener fixtures
+      let fixtures = await fixtureSync.getTodayFixtures();
 
-      // Respuesta formateada
+      // Filtrar por prioridad
+      if (minPriority > 0) {
+        fixtures = fixtures.filter(fixture => 
+          fixture.league && fixture.league.priority >= minPriority
+        );
+      }
+
+      // ✅ USAR FUNCIÓN HELPER EXTERNA
+      const now = new Date();
+      const dateLocal = formatDateForTimezone(now, timezone);
+
       const response = {
         success: true,
         message: `${fixtures.length} partidos encontrados para hoy`,
         data: {
-          date: new Date().toISOString().split('T')[0],
+          date: now.toISOString().split('T')[0],
+          timezone: timezone,
+          dateLocal: dateLocal,
           count: fixtures.length,
           fixtures: fixtures.map(fixture => ({
             id: fixture.id,
             apiFootballId: fixture.apiFootballId,
             date: fixture.fixtureDate,
+            dateLocal: formatDateForTimezone(fixture.fixtureDate, timezone), // ✅ Función externa
+            timezone: timezone,
             status: fixture.status,
             statusLong: fixture.statusLong,
             elapsed: fixture.elapsed,
@@ -38,23 +76,24 @@ class FixturesController {
             city: fixture.city,
             referee: fixture.referee,
             league: {
-              id: fixture.league.id,
-              name: fixture.league.name,
-              shortName: fixture.league.shortName,
-              logo: fixture.league.logo,
-              country: fixture.league.country
+              id: fixture.league?.id,
+              name: fixture.league?.name,
+              shortName: fixture.league?.shortName,
+              logo: fixture.league?.logo,
+              country: fixture.league?.country,
+              priority: fixture.league?.priority
             },
             homeTeam: {
-              id: fixture.homeTeam.id,
-              name: fixture.homeTeam.name,
-              shortName: fixture.homeTeam.shortName,
-              logo: fixture.homeTeam.logo
+              id: fixture.homeTeam?.id,
+              name: fixture.homeTeam?.name,
+              shortName: fixture.homeTeam?.shortName,
+              logo: fixture.homeTeam?.logo
             },
             awayTeam: {
-              id: fixture.awayTeam.id,
-              name: fixture.awayTeam.name,
-              shortName: fixture.awayTeam.shortName,
-              logo: fixture.awayTeam.logo
+              id: fixture.awayTeam?.id,
+              name: fixture.awayTeam?.name,
+              shortName: fixture.awayTeam?.shortName,
+              logo: fixture.awayTeam?.logo
             },
             score: {
               home: fixture.homeScore,
@@ -64,13 +103,20 @@ class FixturesController {
                 away: fixture.awayScoreHt
               }
             },
-            isAvailableForTournament: fixture.isAvailableForTournament
+            isAvailableForTournament: fixture.isAvailableForTournament,
+            isLive: ['1H', 'HT', '2H', 'ET'].includes(fixture.status),
+            isFinished: fixture.status === 'FT'
           }))
         },
         meta: {
-          timestamp: new Date().toISOString(),
+          timestamp: now.toISOString(),
+          timezone: timezone,
           source: 'api-football',
-          cached: false
+          stats: {
+            liveMatches: fixtures.filter(f => ['1H', 'HT', '2H', 'ET'].includes(f.status)).length,
+            upcomingMatches: fixtures.filter(f => f.status === 'NS').length,
+            finishedMatches: fixtures.filter(f => f.status === 'FT').length
+          }
         }
       };
 
@@ -81,17 +127,26 @@ class FixturesController {
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
-        error: process.env.NODE_ENV === 'development' ? error.message : 'Error interno'
+        error: process.env.NODE_ENV === 'development' ? error.message : 'Error interno',
+        timezone: req.query.timezone || 'America/Lima'
       });
     }
   }
 
-  // GET /api/fixtures/search - Buscar fixtures con filtros
+  // ✅ GET /api/fixtures/search - ULTRA SIMPLE
   async searchFixtures(req, res) {
     try {
-      const { date, leagueId, teamId, status, limit } = req.query;
+      const { 
+        date, 
+        leagueId, 
+        teamId, 
+        status, 
+        limit = 50, 
+        timezone = 'America/Lima',
+        minPriority = 0
+      } = req.query;
 
-      logger.info('🔍 Búsqueda de fixtures:', { date, leagueId, teamId, status });
+      logger.info('🔍 Búsqueda de fixtures:', { date, leagueId, teamId, status, timezone });
 
       const criteria = {};
       if (date) criteria.date = date;
@@ -100,18 +155,34 @@ class FixturesController {
       if (status) criteria.status = status;
       if (limit) criteria.limit = parseInt(limit);
 
-      const fixtures = await fixtureSync.searchFixtures(criteria);
+      let fixtures = await fixtureSync.searchFixtures(criteria);
 
-      res.json({
+      // Filtros adicionales
+      if (minPriority > 0) {
+        fixtures = fixtures.filter(fixture => 
+          fixture.league && fixture.league.priority >= parseInt(minPriority)
+        );
+      }
+
+      const response = {
         success: true,
         message: `${fixtures.length} partidos encontrados`,
         data: {
-          criteria,
+          criteria: {
+            date,
+            leagueId,
+            teamId,
+            status,
+            timezone,
+            minPriority: parseInt(minPriority)
+          },
           count: fixtures.length,
           fixtures: fixtures.map(fixture => ({
             id: fixture.id,
             apiFootballId: fixture.apiFootballId,
             date: fixture.fixtureDate,
+            dateLocal: formatDateForTimezone(fixture.fixtureDate, timezone), // ✅ Función externa
+            timezone: timezone,
             status: fixture.status,
             statusLong: fixture.statusLong,
             elapsed: fixture.elapsed,
@@ -128,13 +199,17 @@ class FixturesController {
                 away: fixture.awayScoreHt
               }
             },
-            isAvailableForTournament: fixture.isAvailableForTournament
+            isAvailableForTournament: fixture.isAvailableForTournament,
+            isLive: ['1H', 'HT', '2H', 'ET'].includes(fixture.status)
           }))
         },
         meta: {
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          timezone: timezone
         }
-      });
+      };
+
+      res.json(response);
 
     } catch (error) {
       logger.error('❌ Error buscando fixtures:', error);
@@ -149,7 +224,6 @@ class FixturesController {
   // POST /api/fixtures/sync - Forzar sincronización
   async forceSyncFixtures(req, res) {
     try {
-      // Verificar que el usuario sea admin
       if (!req.user || !req.user.isAdmin) {
         return res.status(403).json({
           success: false,
@@ -157,7 +231,7 @@ class FixturesController {
         });
       }
 
-      logger.info('🔄 Sincronización forzada iniciada por admin:', req.user.email);
+      logger.info(`🔄 Sincronización forzada iniciada por admin: ${req.user.email}`);
 
       const result = await fixtureSync.syncTodayFixtures();
 
@@ -184,22 +258,26 @@ class FixturesController {
   // GET /api/fixtures/live - Obtener partidos en vivo
   async getLiveFixtures(req, res) {
     try {
-      logger.info('🔴 Solicitud: Fixtures en vivo');
+      const timezone = req.query.timezone || 'America/Lima';
+      
+      logger.info(`🔴 Solicitud: Fixtures en vivo (timezone: ${timezone})`);
 
       const liveStatuses = ['1H', 'HT', '2H', 'ET'];
       const fixtures = await fixtureSync.searchFixtures({ 
         status: liveStatuses 
       });
 
-      res.json({
+      const response = {
         success: true,
         message: `${fixtures.length} partidos en vivo`,
         data: {
           count: fixtures.length,
+          timezone: timezone,
           fixtures: fixtures.map(fixture => ({
             id: fixture.id,
             apiFootballId: fixture.apiFootballId,
             date: fixture.fixtureDate,
+            dateLocal: formatDateForTimezone(fixture.fixtureDate, timezone), // ✅ Función externa
             status: fixture.status,
             statusLong: fixture.statusLong,
             elapsed: fixture.elapsed,
@@ -209,14 +287,19 @@ class FixturesController {
             score: {
               home: fixture.homeScore,
               away: fixture.awayScore
-            }
+            },
+            venue: fixture.venue,
+            referee: fixture.referee
           }))
         },
         meta: {
           timestamp: new Date().toISOString(),
+          timezone: timezone,
           refreshInterval: '30s'
         }
-      });
+      };
+
+      res.json(response);
 
     } catch (error) {
       logger.error('❌ Error obteniendo fixtures en vivo:', error);
@@ -232,7 +315,9 @@ class FixturesController {
   async getFixtureById(req, res) {
     try {
       const { id } = req.params;
-      logger.info(`🎯 Solicitud: Fixture ${id}`);
+      const timezone = req.query.timezone || 'America/Lima';
+      
+      logger.info(`🎯 Solicitud: Fixture ${id} (timezone: ${timezone})`);
 
       const fixture = await Fixture.findByPk(id, {
         include: [
@@ -267,10 +352,13 @@ class FixturesController {
           id: fixture.id,
           apiFootballId: fixture.apiFootballId,
           date: fixture.fixtureDate,
+          dateLocal: formatDateForTimezone(fixture.fixtureDate, timezone), // ✅ Función externa
+          timezone: timezone,
           status: fixture.status,
           statusLong: fixture.statusLong,
           elapsed: fixture.elapsed,
           round: fixture.round,
+          season: fixture.season,
           venue: fixture.venue,
           city: fixture.city,
           referee: fixture.referee,
@@ -297,7 +385,8 @@ class FixturesController {
           lastSync: fixture.lastSyncAt
         },
         meta: {
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          timezone: timezone
         }
       });
 
@@ -315,9 +404,9 @@ class FixturesController {
   async getFixturesByLeague(req, res) {
     try {
       const { leagueId } = req.params;
-      const { days = 7 } = req.query;
+      const timezone = req.query.timezone || 'America/Lima';
 
-      logger.info(`🏆 Solicitud: Fixtures de liga ${leagueId}`);
+      logger.info(`🏆 Solicitud: Fixtures de liga ${leagueId} (timezone: ${timezone})`);
 
       const fixtures = await fixtureSync.searchFixtures({ 
         leagueId,
@@ -329,11 +418,13 @@ class FixturesController {
         message: `${fixtures.length} partidos de la liga`,
         data: {
           leagueId,
+          timezone: timezone,
           count: fixtures.length,
           fixtures: fixtures.map(fixture => ({
             id: fixture.id,
             apiFootballId: fixture.apiFootballId,
             date: fixture.fixtureDate,
+            dateLocal: formatDateForTimezone(fixture.fixtureDate, timezone), // ✅ Función externa
             status: fixture.status,
             round: fixture.round,
             homeTeam: fixture.homeTeam,
@@ -342,11 +433,13 @@ class FixturesController {
               home: fixture.homeScore,
               away: fixture.awayScore
             },
-            isAvailableForTournament: fixture.isAvailableForTournament
+            isAvailableForTournament: fixture.isAvailableForTournament,
+            venue: fixture.venue
           }))
         },
         meta: {
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          timezone: timezone
         }
       });
 
