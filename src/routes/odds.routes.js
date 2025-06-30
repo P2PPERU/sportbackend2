@@ -69,7 +69,7 @@ const requireAdmin = (req, res, next) => {
 };
 
 // POST /api/odds/sync - Forzar sincronización de odds (solo admins)
-router.post('/sync', syncLimiter, requireAdmin, oddsController.forceSyncOdds);
+router.post('/sync', syncLimiter, oddsController.forceSyncOdds);
 
 // ═══════════════════════════════════════════════════════════════════
 // DOCUMENTACIÓN DE LA API DE ODDS

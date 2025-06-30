@@ -47,7 +47,7 @@ const League = sequelize.define('League', {
   },
   season: {
     type: DataTypes.INTEGER,
-    defaultValue: 2024,
+    defaultValue: 2025,
     comment: 'Temporada actual'
   },
   type: {

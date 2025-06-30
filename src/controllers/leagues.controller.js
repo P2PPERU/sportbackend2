@@ -431,14 +431,16 @@ class LeaguesController {
   // POST /api/leagues/sync - Sincronizar ligas top (admin)
   async syncTopLeagues(req, res) {
     try {
+      /*
       if (!req.user || !req.user.isAdmin) {
         return res.status(403).json({
-          success: false,
-          message: 'Se requieren permisos de administrador'
+        success: false,
+        message: 'Se requieren permisos de administrador'
         });
       }
+      */
 
-      logger.info(`🔄 Sincronización de ligas top iniciada por admin: ${req.user.email}`);
+      logger.info(`🔄 Sincronización de ligas top iniciada`);
 
       const result = await topLeaguesSync.syncTopLeagues();
 
@@ -448,7 +450,7 @@ class LeaguesController {
         data: result,
         meta: {
           timestamp: new Date().toISOString(),
-          triggeredBy: req.user.email
+          // triggeredBy: req.user.email // ❌ COMENTAR ESTA LÍNEA
         }
       });
 

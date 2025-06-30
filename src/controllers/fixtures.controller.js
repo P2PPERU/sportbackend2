@@ -224,14 +224,16 @@ class FixturesController {
   // POST /api/fixtures/sync - Forzar sincronización
   async forceSyncFixtures(req, res) {
     try {
+      /*
       if (!req.user || !req.user.isAdmin) {
         return res.status(403).json({
           success: false,
           message: 'Se requieren permisos de administrador'
         });
       }
+      */
 
-      logger.info(`🔄 Sincronización forzada iniciada por admin: ${req.user.email}`);
+      logger.info(`🔄 Sincronización forzada iniciada`); // Sin req.user.email
 
       const result = await fixtureSync.syncTodayFixtures();
 
@@ -241,7 +243,7 @@ class FixturesController {
         data: result,
         meta: {
           timestamp: new Date().toISOString(),
-          triggeredBy: req.user.email
+          // triggeredBy: req.user.email // ❌ COMENTAR ESTA LÍNEA
         }
       });
 

@@ -66,6 +66,6 @@ const requireAdmin = (req, res, next) => {
 };
 
 // POST /api/leagues/sync - Sincronizar ligas top (solo admins)
-router.post('/sync', syncLimiter, requireAdmin, leaguesController.syncTopLeagues);
+router.post('/sync', syncLimiter, leaguesController.syncTopLeagues);
 
 module.exports = router;

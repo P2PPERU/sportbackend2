@@ -214,7 +214,7 @@ app.get('/', (req, res) => {
 // app.use('/api/teams', require('./src/routes/teams.routes'));
    app.use('/api/leagues', require('./src/routes/leagues.routes'));
    app.use('/api/odds', require('./src/routes/odds.routes'));
-// app.use('/api/admin', require('./src/routes/admin.routes'));
+   app.use('/api/admin', require('./src/routes/admin.routes'));
 
 // ═══════════════════════════════════════════════════════════════════
 // MANEJO DE ERRORES

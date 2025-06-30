@@ -160,7 +160,7 @@ class FixtureSyncService {
           country: fixtureData.league.country || 'Unknown',
           countryCode: fixtureData.league.flag ? 'XX' : 'XX',
           logo: fixtureData.league.logo,
-          season: fixtureData.league.season || 2024,
+          season: fixtureData.league.season || 2025,
           type: 'League',
           isActive: true,
           priority: 10,

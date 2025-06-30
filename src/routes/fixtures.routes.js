@@ -75,7 +75,7 @@ const requireAdmin = (req, res, next) => {
 };
 
 // POST /api/fixtures/sync - Forzar sincronización (solo admins)
-router.post('/sync', syncLimiter, requireAdmin, fixturesController.forceSyncFixtures);
+router.post('/sync', syncLimiter, fixturesController.forceSyncFixtures);
 
 // ═══════════════════════════════════════════════════════════════════
 // DOCUMENTACIÓN DE ENDPOINTS

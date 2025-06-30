@@ -28,7 +28,7 @@ const TeamStatistics = sequelize.define('TeamStatistics', {
   season: {
     type: DataTypes.INTEGER,
     allowNull: false,
-    defaultValue: 2024
+    defaultValue: 2025
   },
   // Estadísticas generales
   matchesPlayed: {

@@ -48,7 +48,7 @@ const Fixture = sequelize.define('Fixture', {
   season: {
     type: DataTypes.INTEGER,
     allowNull: false,
-    defaultValue: 2024,
+    defaultValue: 2025,
     comment: 'Temporada del partido'
   },
   fixtureDate: {

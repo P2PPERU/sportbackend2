@@ -326,16 +326,19 @@ class OddsController {
   // POST /api/odds/sync - Forzar sincronización de odds (admin)
   async forceSyncOdds(req, res) {
     try {
+      // ❌ COMENTAR ESTAS LÍNEAS:
+      /*
       if (!req.user || !req.user.isAdmin) {
-        return res.status(403).json({
-          success: false,
-          message: 'Se requieren permisos de administrador'
-        });
+      return res.status(403).json({
+        success: false,
+        message: 'Se requieren permisos de administrador'
+      });
       }
+      */
 
       const { fixtureId } = req.body;
 
-      logger.info(`🔄 Sincronización forzada de odds iniciada por admin: ${req.user.email}`);
+      logger.info(`🔄 Sincronización forzada de odds iniciada`); // Sin req.user.email
 
       let result;
       if (fixtureId) {
@@ -360,7 +363,7 @@ class OddsController {
         data: result,
         meta: {
           timestamp: new Date().toISOString(),
-          triggeredBy: req.user.email
+          // triggeredBy: req.user.email // ❌ COMENTAR ESTA LÍNEA
         }
       });
 

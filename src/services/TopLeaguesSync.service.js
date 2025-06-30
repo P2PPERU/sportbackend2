@@ -50,7 +50,7 @@ class TopLeaguesSyncService {
             logger.info(`   ✅ ${leagueInfo.name}: ${fixturesResult.created + fixturesResult.updated} fixtures`);
             
           } catch (error) {
-            logger.error(`   ❌ Error con liga ${leagueId}:`, error.message);
+            logger.error(`❌ Error específico con liga ${leagueId}:`, error.message, error.stack);
             results.leagues.errors++;
           }
         }
@@ -76,15 +76,63 @@ class TopLeaguesSyncService {
     try {
       const response = await apiFootballService.makeRequest('/leagues', {
         id: leagueApiId,
-        season: 2024
+        season: 2025
       });
 
-      if (!response.response || response.response.length === 0) {
-        throw new Error(`Liga ${leagueApiId} no encontrada en API-Football`);
+      // ✅ DEBUG COMPLETO DE LA RESPUESTA
+      logger.info(`🔍 DEBUG Liga ${leagueApiId} - Response COMPLETA:`, {
+        hasResponse: !!response,
+        responseType: typeof response,
+        responseKeys: response ? Object.keys(response) : 'null',
+        results: response?.results,
+        errors: response?.errors,
+        paging: response?.paging,
+        responseLength: response?.response?.length,
+        firstItem: response?.response?.[0],
+        fullResponse: JSON.stringify(response)
+      });
+
+      // ✅ CONSOLE LOG DIRECTO PARA VER EN TERMINAL
+      console.log('🔍 CONSOLE LOG DIRECTO Liga', leagueApiId, ':', response);
+
+      // ✅ VERIFICAR ERRORES EN LA RESPUESTA DE API-FOOTBALL
+      if (response.errors && response.errors.length > 0) {
+        throw new Error(`API-Football errors para liga ${leagueApiId}: ${JSON.stringify(response.errors)}`);
       }
 
+      // ✅ VERIFICAR SI HAY RESPUESTA
+      if (!response.response || response.response.length === 0) {
+        throw new Error(`Liga ${leagueApiId} - sin datos en respuesta. Results: ${response.results}, Errors: ${JSON.stringify(response.errors)}`);
+      }
+
+      // ✅ VERIFICAR QUE NO SEA OBJETO VACÍO
       const leagueData = response.response[0];
+      console.log('🔍 PRIMER ITEM:', leagueData);
+      
+      if (!leagueData || Object.keys(leagueData).length === 0) {
+        throw new Error(`Liga ${leagueApiId} - respuesta vacía: ${JSON.stringify(leagueData)}`);
+      }
+
+      // ✅ VERIFICAR ESTRUCTURA DE DATOS
+      if (!leagueData.league || !leagueData.league.id) {
+        throw new Error(`Liga ${leagueApiId} - estructura de datos inválida. Datos recibidos: ${JSON.stringify(leagueData)}`);
+      }
+
+      // ✅ VALIDAR DATOS CRÍTICOS ANTES DE MAPEAR
+      if (!leagueData.league.name) {
+        throw new Error(`Liga ${leagueApiId} - nombre faltante en respuesta`);
+      }
+
       const leagueInfo = topLeaguesConfig.getLeagueInfo(leagueApiId);
+      
+      // ✅ LOG ANTES DE MAPEAR
+      console.log('📋 DATOS A MAPEAR:', {
+        leagueId: leagueData.league.id,
+        leagueName: leagueData.league.name,
+        country: leagueData.country?.name,
+        seasons: leagueData.seasons,
+        priority: leagueInfo?.priority
+      });
       
       // Mapear datos con prioridad desde configuración
       const mappedData = {
@@ -93,16 +141,19 @@ class TopLeaguesSyncService {
         shortName: leagueData.league.name.length > 20 ? 
           leagueData.league.name.substring(0, 20) : leagueData.league.name,
         code: leagueData.league.name.substring(0, 10).toUpperCase(),
-        country: leagueData.country.name,
-        countryCode: leagueData.country.code,
+        country: leagueData.country?.name || 'Unknown',
+        countryCode: leagueData.country?.code || 'XX',
         logo: leagueData.league.logo,
-        flag: leagueData.country.flag,
-        season: leagueData.seasons?.[0]?.year || 2024,
+        flag: leagueData.country?.flag,
+        season: leagueData.seasons?.[0]?.year || 2025,
         type: leagueData.league.type === 'Cup' ? 'Cup' : 'League',
         isActive: true,
         priority: leagueInfo?.priority || 50, // Usar prioridad de configuración
         lastSyncAt: new Date()
       };
+
+      // ✅ LOG DATOS MAPEADOS
+      console.log('💾 DATOS MAPEADOS para liga', leagueApiId, ':', mappedData);
 
       const [league, created] = await League.findOrCreate({
         where: { apiFootballId: mappedData.apiFootballId },
@@ -110,14 +161,29 @@ class TopLeaguesSyncService {
       });
 
       if (!created) {
+        console.log('🔄 ACTUALIZANDO liga existente:', league.id);
         await league.update(mappedData);
         return { updated: true, league };
       }
 
+      console.log('➕ CREANDO nueva liga:', league.id);
       return { created: true, league };
 
     } catch (error) {
-      logger.error(`Error sincronizando liga ${leagueApiId}:`, error.message);
+      // ✅ LOGGING DETALLADO DE ERRORES
+      logger.error(`❌ Error detallado liga ${leagueApiId}:`, {
+        message: error.message,
+        stack: error.stack,
+        data: error.data || 'No data',
+        errorType: error.constructor.name
+      });
+      
+      // ✅ CONSOLE LOG PARA DEBUG INMEDIATO
+      console.error('❌ ERROR CONSOLE para liga', leagueApiId, ':', {
+        message: error.message,
+        stack: error.stack?.split('\n').slice(0, 3) // Solo primeras 3 líneas del stack
+      });
+      
       throw error;
     }
   }
@@ -135,7 +201,7 @@ class TopLeaguesSyncService {
 
       const response = await apiFootballService.makeRequest('/fixtures', {
         league: leagueApiId,
-        season: 2024,
+        season: 2025,
         from,
         to
       });

@@ -13,7 +13,7 @@ class ApiFootballMapper {
       countryCode: country.code,
       logo: league.logo,
       flag: country.flag,
-      season: apiData.seasons?.[0]?.year || 2024,
+      season: apiData.seasons?.[0]?.year || 2025,
       type: league.type === 'Cup' ? 'Cup' : 'League',
       isActive: true,
       priority: this.getLeaguePriority(league.id),
