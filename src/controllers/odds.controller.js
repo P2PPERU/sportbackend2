@@ -1,23 +1,65 @@
-const oddsSync = require('../services/oddsSync.service');
+// 📄 src/controllers/odds.controller.js - CONSISTENTE CON TU ESTILO
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const oddsSync = require('../services/oddsSync.service'); // Tu servicio actual por ahora
 const { Fixture, League, Team, BettingMarket, Odds } = require('../models');
 const { Op } = require('sequelize');
 const logger = require('../utils/logger');
 
+// ✅ FUNCIÓN HELPER FUERA DE LA CLASE PARA EVITAR PROBLEMAS CON 'THIS'
+function formatDateForTimezone(date, timezone = 'America/Lima') {
+  try {
+    return new Intl.DateTimeFormat('es-PE', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).format(new Date(date));
+  } catch (error) {
+    logger.error(`❌ Error formateando fecha para timezone ${timezone}:`, error.message);
+    return new Date(date).toLocaleString('es-PE'); // Fallback simple
+  }
+}
+
+// ✅ FUNCIÓN HELPER PARA DESCRIPCIÓN DE CATEGORÍAS
+function getCategoryDescription(category) {
+  const descriptions = {
+    'MATCH_RESULT': 'Resultados del partido (1X2, Double Chance)',
+    'GOALS': 'Mercados relacionados con goles (Over/Under, BTTS)',
+    'HALFTIME': 'Mercados del primer tiempo',
+    'SECOND_HALF': 'Mercados del segundo tiempo',
+    'CORNERS': 'Mercados de corners/esquinas',
+    'CARDS': 'Mercados de tarjetas amarillas/rojas',
+    'EXACT_SCORE': 'Resultados exactos',
+    'HANDICAP': 'Hándicaps asiáticos y europeos',
+    'SPECIALS': 'Mercados especiales (Clean Sheet, etc.)',
+    'PLAYER_PROPS': 'Props de jugadores',
+    'COMBINED': 'Mercados combinados',
+    'TIME_SPECIFIC': 'Mercados de tiempo específico',
+    'OTHER': 'Otros mercados detectados'
+  };
+  
+  return descriptions[category] || 'Categoría detectada automáticamente';
+}
+
 class OddsController {
-  // GET /api/odds/fixture/:id - Odds de un fixture específico
+  // ✅ GET /api/odds/fixture/:id - ULTRA SIMPLE
   async getFixtureOdds(req, res) {
     try {
       const { id } = req.params;
-      const { bookmaker = 'Average' } = req.query;
+      const { bookmaker = 'Average', timezone = 'America/Lima' } = req.query;
 
-      logger.info(`📊 Solicitud odds fixture ${id} (bookmaker: ${bookmaker})`);
+      logger.info(`📊 Solicitud: Odds de fixture ${id} (bookmaker: ${bookmaker}, timezone: ${timezone})`);
 
       // Verificar que el fixture existe
       const fixture = await Fixture.findByPk(id, {
         include: [
-          { model: League, as: 'league', attributes: ['name', 'logo'] },
-          { model: Team, as: 'homeTeam', attributes: ['name', 'logo'] },
-          { model: Team, as: 'awayTeam', attributes: ['name', 'logo'] }
+          { model: League, as: 'league', attributes: ['id', 'name', 'logo', 'country'] },
+          { model: Team, as: 'homeTeam', attributes: ['id', 'name', 'logo'] },
+          { model: Team, as: 'awayTeam', attributes: ['id', 'name', 'logo'] }
         ]
       });
 
@@ -28,92 +70,86 @@ class OddsController {
         });
       }
 
-      // Obtener odds
-      const oddsData = await oddsSync.getFixtureOdds(id, bookmaker);
-
-      if (!oddsData.markets || Object.keys(oddsData.markets).length === 0) {
-        // Intentar sincronizar odds si no existen
-        try {
-          await oddsSync.syncFixtureOdds(fixture.apiFootballId);
-          const retryOdds = await oddsSync.getFixtureOdds(id, bookmaker);
-          
-          if (!retryOdds.markets || Object.keys(retryOdds.markets).length === 0) {
-            return res.json({
-              success: true,
-              message: 'Odds no disponibles para este fixture',
-              data: {
-                fixture: {
-                  id: fixture.id,
-                  homeTeam: fixture.homeTeam.name,
-                  awayTeam: fixture.awayTeam.name,
-                  league: fixture.league.name,
-                  date: fixture.fixtureDate,
-                  status: fixture.status
-                },
-                odds: null,
-                availableBookmakers: []
-              }
-            });
-          }
-          
-          oddsData.markets = retryOdds.markets;
-        } catch (syncError) {
-          logger.warn(`No se pudieron sincronizar odds para fixture ${id}:`, syncError.message);
-        }
+      // Obtener odds (usando tu servicio actual)
+      let oddsData;
+      try {
+        // ✅ CUANDO IMPLEMENTES EL DINÁMICO, CAMBIAR ESTA LÍNEA:
+        // oddsData = await dynamicOddsSync.getFixtureOdds(id, bookmaker);
+        
+        // ✅ POR AHORA USA TU SERVICIO ACTUAL:
+        oddsData = await oddsSync.getFixtureOdds(id, bookmaker);
+      } catch (oddsError) {
+        logger.warn(`⚠️ Error obteniendo odds para fixture ${id}:`, oddsError.message);
+        oddsData = { categorizedMarkets: {}, totalMarkets: 0, totalCategories: 0 };
       }
 
       // Obtener bookmakers disponibles
       const availableBookmakers = await Odds.findAll({
         where: { fixtureId: id, isActive: true },
         attributes: ['bookmaker'],
-        group: ['bookmaker']
+        group: ['bookmaker'],
+        raw: true
       });
 
-      res.json({
+      const response = {
         success: true,
         message: 'Odds obtenidas exitosamente',
         data: {
           fixture: {
             id: fixture.id,
-            homeTeam: fixture.homeTeam.name,
-            awayTeam: fixture.awayTeam.name,
-            league: fixture.league.name,
+            apiFootballId: fixture.apiFootballId,
+            homeTeam: fixture.homeTeam?.name || 'TBD',
+            awayTeam: fixture.awayTeam?.name || 'TBD',
+            league: fixture.league?.name || 'Unknown',
             date: fixture.fixtureDate,
+            dateLocal: formatDateForTimezone(fixture.fixtureDate, timezone), // ✅ Función externa
+            timezone: timezone,
             status: fixture.status
           },
-          odds: oddsData.markets,
+          odds: {
+            categorizedMarkets: oddsData.categorizedMarkets || {},
+            totalMarkets: oddsData.totalMarkets || 0,
+            totalCategories: oddsData.totalCategories || 0
+          },
           bookmaker: bookmaker,
           availableBookmakers: availableBookmakers.map(b => b.bookmaker),
-          lastSync: oddsData.lastSync
+          lastSync: oddsData.lastSync || new Date().toISOString()
         },
         meta: {
           timestamp: new Date().toISOString(),
-          marketsCount: Object.keys(oddsData.markets || {}).length
+          timezone: timezone,
+          marketsCount: oddsData.totalMarkets || 0,
+          categoriesCount: oddsData.totalCategories || 0,
+          source: 'api-football'
         }
-      });
+      };
+
+      res.json(response);
 
     } catch (error) {
       logger.error(`❌ Error obteniendo odds de fixture ${req.params.id}:`, error);
       res.status(500).json({
         success: false,
         message: 'Error obteniendo odds del fixture',
-        error: process.env.NODE_ENV === 'development' ? error.message : 'Error interno'
+        error: process.env.NODE_ENV === 'development' ? error.message : 'Error interno',
+        timezone: req.query.timezone || 'America/Lima'
       });
     }
   }
 
-  // GET /api/odds/fixture/:id/best - Mejores odds de un fixture
+  // ✅ GET /api/odds/fixture/:id/best - ULTRA SIMPLE
   async getBestFixtureOdds(req, res) {
     try {
       const { id } = req.params;
+      const { timezone = 'America/Lima' } = req.query;
 
-      logger.info(`🎯 Solicitud mejores odds fixture ${id}`);
+      logger.info(`🎯 Solicitud: Mejores odds de fixture ${id} (timezone: ${timezone})`);
 
       const fixture = await Fixture.findByPk(id, {
         include: [
-          { model: League, as: 'league', attributes: ['name', 'logo'] },
-          { model: Team, as: 'homeTeam', attributes: ['name', 'logo'] },
-          { model: Team, as: 'awayTeam', attributes: ['name', 'logo'] }
+          { model: League, as: 'league', attributes: ['id', 'name', 'logo'] },
+          { model: Team, as: 'homeTeam', attributes: ['id', 'name', 'logo'] },
+          { model: Team, as: 'awayTeam', attributes: ['id', 'name', 'logo'] }
         ]
       });
 
@@ -124,28 +160,45 @@ class OddsController {
         });
       }
 
-      const bestOdds = await oddsSync.getBestOdds(id);
+      // Obtener mejores odds
+      let bestOdds;
+      try {
+        // ✅ CUANDO IMPLEMENTES EL DINÁMICO, CAMBIAR ESTA LÍNEA:
+        // bestOdds = await dynamicOddsSync.getBestOdds(id);
+        
+        // ✅ POR AHORA USA TU SERVICIO ACTUAL:
+        bestOdds = await oddsSync.getBestOdds(id);
+      } catch (oddsError) {
+        logger.warn(`⚠️ Error obteniendo mejores odds para fixture ${id}:`, oddsError.message);
+        bestOdds = { bestOdds: {}, totalMarkets: 0 };
+      }
 
-      res.json({
+      const response = {
         success: true,
         message: 'Mejores odds obtenidas exitosamente',
         data: {
           fixture: {
             id: fixture.id,
-            homeTeam: fixture.homeTeam.name,
-            awayTeam: fixture.awayTeam.name,
-            league: fixture.league.name,
+            homeTeam: fixture.homeTeam?.name || 'TBD',
+            awayTeam: fixture.awayTeam?.name || 'TBD',
+            league: fixture.league?.name || 'Unknown',
             date: fixture.fixtureDate,
+            dateLocal: formatDateForTimezone(fixture.fixtureDate, timezone), // ✅ Función externa
+            timezone: timezone,
             status: fixture.status
           },
-          bestOdds: bestOdds.bestOdds,
-          lastSync: bestOdds.lastSync
+          bestOdds: bestOdds.bestOdds || {},
+          totalMarkets: bestOdds.totalMarkets || 0,
+          lastSync: bestOdds.lastSync || new Date().toISOString()
         },
         meta: {
           timestamp: new Date().toISOString(),
-          marketsCount: Object.keys(bestOdds.bestOdds || {}).length
+          timezone: timezone,
+          marketsCount: bestOdds.totalMarkets || 0
         }
-      });
+      };
+
+      res.json(response);
 
     } catch (error) {
       logger.error(`❌ Error obteniendo mejores odds de fixture ${req.params.id}:`, error);
@@ -157,12 +210,18 @@ class OddsController {
     }
   }
 
-  // GET /api/odds/today - Odds de fixtures de hoy (ligas top)
+  // ✅ GET /api/odds/today - ULTRA SIMPLE
   async getTodayOdds(req, res) {
     try {
-      const { league, market = '1X2', bookmaker = 'Average' } = req.query;
+      const { 
+        league, 
+        market = '1X2', 
+        bookmaker = 'Average',
+        timezone = 'America/Lima',
+        minPriority = 70
+      } = req.query;
 
-      logger.info('📅 Solicitud odds de fixtures de hoy');
+      logger.info('📅 Solicitud: Odds de fixtures de hoy', { league, market, bookmaker, timezone });
 
       // Buscar fixtures de hoy con odds
       const today = new Date();
@@ -177,11 +236,11 @@ class OddsController {
         { 
           model: League, 
           as: 'league',
-          where: { priority: { [Op.gte]: 75 } }, // Solo ligas importantes
+          where: { priority: { [Op.gte]: parseInt(minPriority) } }, // Solo ligas importantes
           attributes: ['id', 'name', 'logo', 'country', 'priority']
         },
-        { model: Team, as: 'homeTeam', attributes: ['name', 'logo'] },
-        { model: Team, as: 'awayTeam', attributes: ['name', 'logo'] }
+        { model: Team, as: 'homeTeam', attributes: ['id', 'name', 'logo'] },
+        { model: Team, as: 'awayTeam', attributes: ['id', 'name', 'logo'] }
       ];
 
       // Filtro opcional por liga
@@ -196,7 +255,7 @@ class OddsController {
           ['league', 'priority', 'DESC'],
           ['fixtureDate', 'ASC']
         ],
-        limit: 50
+        limit: 30
       });
 
       // Obtener odds para cada fixture
@@ -204,89 +263,120 @@ class OddsController {
 
       for (const fixture of fixtures) {
         try {
-          const odds = await Odds.findAll({
+          // Buscar si hay odds para este fixture
+          const hasOdds = await Odds.findOne({
             where: {
               fixtureId: fixture.id,
               bookmaker,
               isActive: true
-            },
-            include: [
-              {
-                model: BettingMarket,
-                as: 'market',
-                where: { key: market },
-                attributes: ['key', 'name']
-              }
-            ]
+            }
           });
 
-          if (odds.length > 0) {
-            const oddsObj = {};
-            odds.forEach(odd => {
-              oddsObj[odd.outcome] = {
-                odds: parseFloat(odd.odds),
-                impliedProbability: parseFloat(odd.impliedProbability)
-              };
-            });
+          if (hasOdds) {
+            // Obtener odds básicas del fixture
+            const fixtureOdds = await oddsSync.getFixtureOdds(fixture.id, bookmaker);
+            
+            // Buscar mercado específico
+            let selectedMarket = null;
+            if (fixtureOdds && fixtureOdds.categorizedMarkets) {
+              for (const [category, markets] of Object.entries(fixtureOdds.categorizedMarkets)) {
+                for (const [marketKey, marketData] of Object.entries(markets)) {
+                  if (marketKey.includes(market.toUpperCase()) || category === 'MATCH_RESULT') {
+                    selectedMarket = {
+                      key: marketKey,
+                      name: marketData.market?.name || marketKey,
+                      odds: marketData.odds || {}
+                    };
+                    break;
+                  }
+                }
+                if (selectedMarket) break;
+              }
+            }
 
-            fixturesWithOdds.push({
-              id: fixture.id,
-              homeTeam: fixture.homeTeam.name,
-              awayTeam: fixture.awayTeam.name,
-              league: fixture.league.name,
-              date: fixture.fixtureDate,
-              status: fixture.status,
-              odds: oddsObj,
-              market: odds[0].market.name
-            });
+            if (selectedMarket && Object.keys(selectedMarket.odds).length > 0) {
+              fixturesWithOdds.push({
+                id: fixture.id,
+                apiFootballId: fixture.apiFootballId,
+                homeTeam: fixture.homeTeam?.name || 'TBD',
+                awayTeam: fixture.awayTeam?.name || 'TBD',
+                league: fixture.league?.name || 'Unknown',
+                date: fixture.fixtureDate,
+                dateLocal: formatDateForTimezone(fixture.fixtureDate, timezone), // ✅ Función externa
+                timezone: timezone,
+                status: fixture.status,
+                odds: selectedMarket.odds,
+                market: selectedMarket.name,
+                marketKey: selectedMarket.key
+              });
+            }
           }
         } catch (oddError) {
           // Continuar si no hay odds para este fixture
+          logger.debug(`⚠️ No hay odds para fixture ${fixture.id}: ${oddError.message}`);
           continue;
         }
       }
 
-      res.json({
+      const response = {
         success: true,
         message: `${fixturesWithOdds.length} fixtures con odds encontrados`,
         data: {
           date: startOfDay.toISOString().split('T')[0],
+          dateLocal: formatDateForTimezone(startOfDay, timezone), // ✅ Función externa
+          timezone: timezone,
           market: market,
           bookmaker: bookmaker,
+          count: fixturesWithOdds.length,
           fixtures: fixturesWithOdds
         },
         meta: {
           timestamp: new Date().toISOString(),
+          timezone: timezone,
           totalFixtures: fixtures.length,
-          fixturesWithOdds: fixturesWithOdds.length
+          fixturesWithOdds: fixturesWithOdds.length,
+          source: 'api-football'
         }
-      });
+      };
+
+      res.json(response);
 
     } catch (error) {
       logger.error('❌ Error obteniendo odds de hoy:', error);
       res.status(500).json({
         success: false,
         message: 'Error obteniendo odds de hoy',
-        error: process.env.NODE_ENV === 'development' ? error.message : 'Error interno'
+        error: process.env.NODE_ENV === 'development' ? error.message : 'Error interno',
+        timezone: req.query.timezone || 'America/Lima'
       });
     }
   }
 
-  // GET /api/odds/markets - Listar mercados disponibles
+  // ✅ GET /api/odds/markets - ULTRA SIMPLE
   async getAvailableMarkets(req, res) {
     try {
-      logger.info('📋 Solicitud mercados de apuestas disponibles');
+      const { timezone = 'America/Lima' } = req.query;
+
+      logger.info('📋 Solicitud: Mercados de apuestas disponibles', { timezone });
 
       const markets = await BettingMarket.findAll({
         where: { isActive: true },
-        attributes: ['id', 'key', 'name', 'description', 'category', 'possibleOutcomes', 'priority'],
+        attributes: [
+          'id', 'key', 'name', 'category', 'priority', 'description'
+        ],
         order: [['priority', 'DESC'], ['name', 'ASC']]
       });
 
       // Agrupar por categoría
       const groupedMarkets = {};
+      const stats = {
+        totalMarkets: markets.length,
+        categoriesCount: 0,
+        mostUsedMarkets: []
+      };
+
       markets.forEach(market => {
-        const category = market.category;
+        const category = market.category || 'OTHER';
         if (!groupedMarkets[category]) {
           groupedMarkets[category] = [];
         }
@@ -294,27 +384,37 @@ class OddsController {
           id: market.id,
           key: market.key,
           name: market.name,
-          description: market.description,
-          possibleOutcomes: market.possibleOutcomes,
-          priority: market.priority
+          priority: market.priority,
+          description: market.description
         });
       });
 
-      res.json({
+      stats.categoriesCount = Object.keys(groupedMarkets).length;
+      stats.mostUsedMarkets = markets
+        .slice(0, 10)
+        .map(m => ({ key: m.key, name: m.name, priority: m.priority }));
+
+      const response = {
         success: true,
         message: `${markets.length} mercados de apuestas disponibles`,
         data: {
           markets: groupedMarkets,
           categories: Object.keys(groupedMarkets),
-          totalMarkets: markets.length
+          totalMarkets: stats.totalMarkets,
+          timezone: timezone
         },
+        stats,
         meta: {
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          timezone: timezone,
+          source: 'database'
         }
-      });
+      };
+
+      res.json(response);
 
     } catch (error) {
-      logger.error('❌ Error obteniendo mercados:', error);
+      logger.error('❌ Error obteniendo mercados de apuestas:', error);
       res.status(500).json({
         success: false,
         message: 'Error obteniendo mercados de apuestas',
@@ -323,22 +423,13 @@ class OddsController {
     }
   }
 
-  // POST /api/odds/sync - Forzar sincronización de odds (admin)
+  // ✅ POST /api/odds/sync - ULTRA SIMPLE
   async forceSyncOdds(req, res) {
     try {
-      // ❌ COMENTAR ESTAS LÍNEAS:
-      /*
-      if (!req.user || !req.user.isAdmin) {
-      return res.status(403).json({
-        success: false,
-        message: 'Se requieren permisos de administrador'
-      });
-      }
-      */
-
       const { fixtureId } = req.body;
+      const { timezone = 'America/Lima' } = req.query;
 
-      logger.info(`🔄 Sincronización forzada de odds iniciada`); // Sin req.user.email
+      logger.info(`🔄 Sincronización de odds iniciada`, { fixtureId, timezone });
 
       let result;
       if (fixtureId) {
@@ -357,18 +448,26 @@ class OddsController {
         result = await oddsSync.syncTodayOdds();
       }
 
-      res.json({
+      const response = {
         success: true,
         message: 'Sincronización de odds completada exitosamente',
-        data: result,
+        data: {
+          ...result,
+          timestamp: new Date().toISOString(),
+          timestampLocal: formatDateForTimezone(new Date(), timezone), // ✅ Función externa
+          timezone: timezone
+        },
         meta: {
           timestamp: new Date().toISOString(),
-          // triggeredBy: req.user.email // ❌ COMENTAR ESTA LÍNEA
+          timezone: timezone,
+          source: 'api-football'
         }
-      });
+      };
+
+      res.json(response);
 
     } catch (error) {
-      logger.error('❌ Error en sincronización forzada de odds:', error);
+      logger.error('❌ Error en sincronización de odds:', error);
       res.status(500).json({
         success: false,
         message: 'Error en sincronización de odds',
@@ -377,21 +476,53 @@ class OddsController {
     }
   }
 
-  // GET /api/odds/stats - Estadísticas de odds
+  // ✅ GET /api/odds/stats - ULTRA SIMPLE
   async getOddsStats(req, res) {
     try {
-      logger.info('📈 Solicitud estadísticas de odds');
+      const { timezone = 'America/Lima' } = req.query;
 
-      const stats = await oddsSync.getOddsStats();
+      logger.info('📈 Solicitud: Estadísticas de odds', { timezone });
 
-      res.json({
+      // Estadísticas básicas
+      const [marketCount, oddsCount] = await Promise.all([
+        BettingMarket.count({ where: { isActive: true } }),
+        Odds.count({ where: { isActive: true } })
+      ]);
+
+      // Bookmakers disponibles
+      const bookmakers = await Odds.findAll({
+        where: { isActive: true },
+        attributes: [
+          'bookmaker',
+          [Odds.sequelize.fn('COUNT', Odds.sequelize.col('id')), 'oddsCount']
+        ],
+        group: ['bookmaker'],
+        order: [[Odds.sequelize.fn('COUNT', Odds.sequelize.col('id')), 'DESC']]
+      });
+
+      const response = {
         success: true,
         message: 'Estadísticas de odds obtenidas',
-        data: stats,
+        data: {
+          totalMarkets: marketCount,
+          totalOdds: oddsCount,
+          activeBookmakers: bookmakers.length,
+          timezone: timezone,
+          lastUpdate: new Date().toISOString(),
+          lastUpdateLocal: formatDateForTimezone(new Date(), timezone), // ✅ Función externa
+          bookmakers: bookmakers.map(b => ({
+            name: b.bookmaker,
+            oddsCount: parseInt(b.dataValues.oddsCount)
+          }))
+        },
         meta: {
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          timezone: timezone,
+          source: 'database'
         }
-      });
+      };
+
+      res.json(response);
 
     } catch (error) {
       logger.error('❌ Error obteniendo estadísticas de odds:', error);
@@ -403,10 +534,12 @@ class OddsController {
     }
   }
 
-  // GET /api/odds/bookmakers - Listar bookmakers disponibles
+  // ✅ GET /api/odds/bookmakers - ULTRA SIMPLE
   async getBookmakers(req, res) {
     try {
-      const { fixtureId } = req.query;
+      const { fixtureId, timezone = 'America/Lima' } = req.query;
+
+      logger.info('🏪 Solicitud: Bookmakers disponibles', { fixtureId, timezone });
 
       let whereClause = { isActive: true };
       if (fixtureId) {
@@ -421,32 +554,87 @@ class OddsController {
           [Odds.sequelize.fn('MAX', Odds.sequelize.col('last_updated')), 'lastUpdate']
         ],
         group: ['bookmaker'],
-        order: [
-          [Odds.sequelize.fn('COUNT', Odds.sequelize.col('id')), 'DESC']
-        ]
+        order: [[Odds.sequelize.fn('COUNT', Odds.sequelize.col('id')), 'DESC']]
       });
 
-      res.json({
+      const response = {
         success: true,
         message: `${bookmakers.length} bookmakers disponibles`,
         data: {
           bookmakers: bookmakers.map(b => ({
             name: b.bookmaker,
             oddsCount: parseInt(b.dataValues.oddsCount),
-            lastUpdate: b.dataValues.lastUpdate
+            lastUpdate: b.dataValues.lastUpdate,
+            lastUpdateLocal: formatDateForTimezone(b.dataValues.lastUpdate, timezone) // ✅ Función externa
           })),
+          count: bookmakers.length,
+          timezone: timezone,
           ...(fixtureId && { fixtureId })
         },
         meta: {
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          timezone: timezone,
+          source: 'database'
         }
-      });
+      };
+
+      res.json(response);
 
     } catch (error) {
       logger.error('❌ Error obteniendo bookmakers:', error);
       res.status(500).json({
         success: false,
         message: 'Error obteniendo bookmakers',
+        error: process.env.NODE_ENV === 'development' ? error.message : 'Error interno'
+      });
+    }
+  }
+
+  // ✅ GET /api/odds/categories - ULTRA SIMPLE
+  async getOddsCategories(req, res) {
+    try {
+      const { timezone = 'America/Lima' } = req.query;
+
+      logger.info('📊 Solicitud: Categorías de mercados', { timezone });
+
+      const categories = await BettingMarket.findAll({
+        where: { isActive: true },
+        attributes: [
+          'category',
+          [BettingMarket.sequelize.fn('COUNT', BettingMarket.sequelize.col('id')), 'marketCount']
+        ],
+        group: ['category'],
+        order: [[BettingMarket.sequelize.fn('COUNT', BettingMarket.sequelize.col('id')), 'DESC']]
+      });
+
+      const enrichedCategories = categories.map(cat => ({
+        category: cat.category,
+        marketCount: parseInt(cat.dataValues.marketCount),
+        description: getCategoryDescription(cat.category) // ✅ Función externa
+      }));
+
+      const response = {
+        success: true,
+        message: `${enrichedCategories.length} categorías de mercados encontradas`,
+        data: {
+          categories: enrichedCategories,
+          totalCategories: enrichedCategories.length,
+          timezone: timezone
+        },
+        meta: {
+          timestamp: new Date().toISOString(),
+          timezone: timezone,
+          source: 'database'
+        }
+      };
+
+      res.json(response);
+
+    } catch (error) {
+      logger.error('❌ Error obteniendo categorías de mercados:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error obteniendo categorías',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Error interno'
       });
     }
