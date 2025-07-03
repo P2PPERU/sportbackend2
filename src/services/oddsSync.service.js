@@ -271,7 +271,10 @@ class DynamicOddsSyncService {
           }
         });
 
-        if (odds.length === 0) continue;
+        if (odds.length === 0) {
+          logger.warn(`⚠️ No odds found for market ${market.id} in fixture ${fixtureId}`);
+          continue;
+        }
 
         // Agrupar por outcome
         const outcomeGroups = {};
