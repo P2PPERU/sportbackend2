@@ -1,9 +1,10 @@
-// 📄 scripts/migrateToDynamicOdds.js - MIGRACIÓN A ODDS DINÁMICAS
+// 📄 scripts/migrateToDynamicOdds.js - MIGRACIÓN CORREGIDA
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 require('dotenv').config();
 const sequelize = require('../src/config/database');
 const { BettingMarket, Odds } = require('../src/models');
+const { Op } = require('sequelize'); // ✅ AGREGAR ESTA LÍNEA - FALTABA!
 const logger = require('../src/utils/logger');
 
 class DynamicOddsMigration {
@@ -77,8 +78,7 @@ class DynamicOddsMigration {
       const newColumns = [
         {
           name: 'api_football_id',
-          type: 'INTEGER',
-          constraint: 'UNIQUE'
+          type: 'INTEGER'
         },
         {
           name: 'usage_count',
@@ -184,10 +184,10 @@ class DynamicOddsMigration {
             migratedCount++;
           } else {
             // Mercado custom - mantener pero marcar como legacy
-            const fakeApiId = 9000 + market.id.slice(-4); // ID temporal para evitar conflictos
+            const fakeApiId = 9000 + parseInt(market.id.slice(-3)); // ID temporal
             
             await market.update({
-              apiFootballId: parseInt(fakeApiId),
+              apiFootballId: fakeApiId,
               usageCount: 0,
               lastSeenAt: new Date(),
               originalData: {
@@ -217,26 +217,31 @@ class DynamicOddsMigration {
       logger.info('🧹 Limpiando datos obsoletos...');
 
       // Eliminar odds huérfanas (sin mercado válido)
-      const orphanedOdds = await sequelize.query(`
+      const deleteResult = await sequelize.query(`
         DELETE FROM odds 
         WHERE market_id NOT IN (
           SELECT id FROM betting_markets WHERE api_football_id IS NOT NULL
         );
       `, { type: sequelize.QueryTypes.DELETE });
 
-      logger.info(`🗑️ ${orphanedOdds[1]} odds huérfanas eliminadas`);
+      logger.info(`🗑️ ${deleteResult[1] || 0} odds huérfanas eliminadas`);
 
       // Marcar mercados inactivos que no se han visto recientemente
-      const inactiveMarkets = await BettingMarket.update(
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      
+      const [inactiveCount] = await BettingMarket.update(
         { isActive: false },
         { 
           where: { 
-            lastSeenAt: { [Op.or]: [null, { [Op.lt]: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }] }
+            [Op.or]: [
+              { lastSeenAt: null },
+              { lastSeenAt: { [Op.lt]: thirtyDaysAgo } }
+            ]
           }
         }
       );
 
-      logger.info(`📊 ${inactiveMarkets[0]} mercados marcados como inactivos`);
+      logger.info(`📊 ${inactiveCount} mercados marcados como inactivos`);
 
     } catch (error) {
       logger.error('❌ Error limpiando datos:', error);
@@ -295,7 +300,7 @@ class DynamicOddsMigration {
 
       // Restaurar desde backup
       await sequelize.query(`
-        TRUNCATE TABLE betting_markets;
+        TRUNCATE TABLE betting_markets CASCADE;
         INSERT INTO betting_markets SELECT * FROM betting_markets_backup;
       `);
 
