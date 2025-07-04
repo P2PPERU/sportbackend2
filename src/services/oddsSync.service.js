@@ -1,3 +1,6 @@
+// 📄 src/services/oddsSync.service.js - VERSIÓN MEJORADA
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 const { Odds, BettingMarket, Fixture, League, Team } = require('../models');
 const { Op } = require('sequelize');
 const apiFootballService = require('./apiFootballService');
@@ -5,24 +8,26 @@ const dynamicOddsMapper = require('../utils/dynamicOddsMapper.service');
 const cacheService = require('./cacheService');
 const logger = require('../utils/logger');
 
-class DynamicOddsSyncService {
+class ImprovedOddsSyncService {
   constructor() {
-    // ✅ SIN MAPEO MANUAL - TODO ES DINÁMICO
-    logger.info('🎯 DynamicOddsSyncService initialized - Mapeo 100% automático');
+    logger.info('🎯 ImprovedOddsSyncService initialized - Estructura preservada');
     
-    // Estadísticas de rendimiento
+    // Estadísticas mejoradas
     this.stats = {
       totalMarketsProcessed: 0,
       totalOddsProcessed: 0,
       newMarketsCreated: 0,
-      errorsEncountered: 0
+      bookmakersSynced: new Set(),
+      marketsSeen: new Set(),
+      errorsEncountered: 0,
+      startTime: new Date()
     };
   }
 
-  // ✅ SINCRONIZAR ODDS DE UN FIXTURE - COMPLETAMENTE DINÁMICO
+  // ✅ SINCRONIZAR ODDS DE UN FIXTURE - PRESERVANDO ESTRUCTURA
   async syncFixtureOdds(fixtureApiId) {
     try {
-      logger.info(`🎯 SINCRONIZACIÓN DINÁMICA para fixture ${fixtureApiId}...`);
+      logger.info(`🎯 Sincronización estructurada para fixture ${fixtureApiId}...`);
 
       // Buscar fixture en nuestra BD
       const fixture = await Fixture.findOne({
@@ -34,188 +39,160 @@ class DynamicOddsSyncService {
         throw new Error(`Fixture ${fixtureApiId} no encontrado en BD`);
       }
 
-      // ✅ OBTENER TODAS LAS ODDS DE API-FOOTBALL (SIN FILTROS)
-      logger.info(`📡 Obteniendo TODAS las odds de API-Football para fixture ${fixtureApiId}...`);
-      
+      // ✅ OBTENER TODAS LAS ODDS DE API-FOOTBALL
       const response = await apiFootballService.makeRequest('/odds', {
         fixture: fixtureApiId
-        // ✅ SIN PARÁMETROS ADICIONALES = OBTIENE TODO
       });
 
       if (!response.response || response.response.length === 0) {
         logger.warn(`⚠️ No hay odds disponibles para fixture ${fixtureApiId}`);
-        return { 
-          created: 0, 
-          updated: 0, 
-          errors: 0, 
-          markets: 0, 
-          bookmakers: 0,
-          message: 'No odds available' 
-        };
+        return this.createEmptyResult('No odds available');
       }
 
-      // ✅ LOG DETALLADO DE LO QUE RECIBIMOS
+      // Datos de respuesta
       const oddsData = response.response[0];
-      logger.info(`📊 ✅ RESPUESTA EXITOSA:
-        🎯 Fixture: ${oddsData.fixture.id} (${fixture.homeTeam.name} vs ${fixture.awayTeam.name})
-        🏆 Liga: ${oddsData.league.name}
+      
+      logger.info(`📊 Respuesta de API-Football:
+        🎯 Fixture: ${fixture.homeTeam.name} vs ${fixture.awayTeam.name}
+        🏆 Liga: ${fixture.league.name}
         📅 Fecha: ${oddsData.fixture.date}
-        🎲 Total bookmakers: ${oddsData.bookmakers.length}
-        📋 Bookmakers: ${oddsData.bookmakers.map(b => b.name).join(', ')}`);
+        🎲 Bookmakers: ${oddsData.bookmakers.length}
+        📚 Total mercados: ${oddsData.bookmakers.reduce((sum, b) => sum + b.bets.length, 0)}`);
 
+      // ✅ PROCESAR CADA BOOKMAKER
       const results = {
-        created: 0,
-        updated: 0,
-        errors: 0,
-        markets: 0,
-        bookmakers: oddsData.bookmakers.length,
-        newMarkets: 0,
-        processedMarkets: new Set()
+        fixture: {
+          id: fixture.id,
+          apiId: fixture.apiFootballId,
+          teams: `${fixture.homeTeam.name} vs ${fixture.awayTeam.name}`,
+          date: fixture.fixtureDate
+        },
+        bookmakers: {},
+        summary: {
+          totalBookmakers: oddsData.bookmakers.length,
+          totalMarkets: 0,
+          totalOdds: 0,
+          newMarkets: 0,
+          errors: 0
+        }
       };
 
-      // ✅ PROCESAR CADA BOOKMAKER Y SUS MERCADOS
+      // Procesar cada bookmaker
       for (const bookmaker of oddsData.bookmakers) {
-        logger.info(`🏪 Procesando ${bookmaker.name}: ${bookmaker.bets.length} mercados`);
+        const bookmakerResult = await this.processBookmaker(
+          fixture.id,
+          bookmaker
+        );
         
-        try {
-          for (const bet of bookmaker.bets) {
-            // ✅ PROCESAR MERCADO DINÁMICAMENTE
-            const marketResult = await this.processDynamicMarket(
-              fixture.id,
-              bookmaker.name,
-              bet
-            );
-            
-            // Actualizar estadísticas
-            results.created += marketResult.created || 0;
-            results.updated += marketResult.updated || 0;
-            results.errors += marketResult.errors || 0;
-            
-            if (marketResult.newMarket) {
-              results.newMarkets++;
-            }
-            
-            results.processedMarkets.add(bet.id);
-            results.markets++;
-            
-            // Log progreso cada 5 mercados
-            if (results.markets % 5 === 0) {
-              logger.debug(`📈 Progreso: ${results.markets} mercados procesados`);
-            }
-          }
-        } catch (bookmakerError) {
-          logger.error(`❌ Error procesando bookmaker ${bookmaker.name}:`, bookmakerError.message);
-          results.errors++;
-        }
+        results.bookmakers[bookmaker.name] = bookmakerResult;
+        results.summary.totalMarkets += bookmakerResult.markets;
+        results.summary.totalOdds += bookmakerResult.odds;
+        results.summary.newMarkets += bookmakerResult.newMarkets;
+        results.summary.errors += bookmakerResult.errors;
+        
+        this.stats.bookmakersSynced.add(bookmaker.name);
       }
 
-      // ✅ CALCULAR ODDS PROMEDIO DINÁMICAMENTE
-      logger.info(`🧮 Calculando odds promedio para ${results.processedMarkets.size} mercados únicos...`);
-      await this.calculateDynamicAverageOdds(fixture.id, Array.from(results.processedMarkets));
+      // ✅ CALCULAR ODDS PROMEDIO
+      await this.calculateStructuredAverageOdds(fixture.id);
 
-      // ✅ ACTUALIZAR ESTADÍSTICAS GLOBALES
-      this.stats.totalMarketsProcessed += results.markets;
-      this.stats.totalOddsProcessed += results.created + results.updated;
-      this.stats.newMarketsCreated += results.newMarkets;
-      this.stats.errorsEncountered += results.errors;
+      // Log resumen
+      logger.info(`✅ Sincronización completada para ${fixture.homeTeam.name} vs ${fixture.awayTeam.name}:
+        📊 ${results.summary.totalBookmakers} bookmakers
+        🎯 ${results.summary.totalMarkets} mercados (${results.summary.newMarkets} nuevos)
+        💾 ${results.summary.totalOdds} odds guardadas
+        ❌ ${results.summary.errors} errores`);
 
-      const successMessage = `✅ SINCRONIZACIÓN DINÁMICA COMPLETADA:
-        🎯 Fixture: ${fixture.homeTeam.name} vs ${fixture.awayTeam.name}
-        🎲 ${results.bookmakers} bookmakers procesados
-        📊 ${results.markets} mercados procesados (${results.newMarkets} nuevos)
-        💾 ${results.created + results.updated} odds guardadas (${results.created} nuevas, ${results.updated} actualizadas)
-        ❌ ${results.errors} errores
-        🆕 ${results.processedMarkets.size} mercados únicos detectados`;
-      
-      logger.info(successMessage);
       return results;
 
     } catch (error) {
-      logger.error(`❌ ERROR EN SINCRONIZACIÓN DINÁMICA para fixture ${fixtureApiId}:`, error);
+      logger.error(`❌ Error en sincronización para fixture ${fixtureApiId}:`, error);
       this.stats.errorsEncountered++;
       throw error;
     }
   }
 
-  // ✅ PROCESAR UN MERCADO DINÁMICAMENTE
-  async processDynamicMarket(fixtureId, bookmakerName, apiBet) {
-    try {
-      logger.debug(`🔄 Procesando mercado dinámico: ${apiBet.name} (ID: ${apiBet.id})`);
+  // ✅ PROCESAR UN BOOKMAKER COMPLETO
+  async processBookmaker(fixtureId, bookmakerData) {
+    const result = {
+      name: bookmakerData.name,
+      id: bookmakerData.id,
+      markets: 0,
+      odds: 0,
+      newMarkets: 0,
+      errors: 0,
+      processedBets: []
+    };
 
-      // ✅ BUSCAR O CREAR MERCADO DINÁMICAMENTE
-      let market = await BettingMarket.findOne({
-        where: { apiFootballId: apiBet.id }
-      });
+    logger.info(`🏪 Procesando ${bookmakerData.name}: ${bookmakerData.bets.length} mercados`);
 
-      let isNewMarket = false;
-
-      if (!market) {
-        // ✅ CREAR MERCADO NUEVO DINÁMICAMENTE
-        logger.info(`🆕 Creando nuevo mercado: ${apiBet.name} (ID: ${apiBet.id})`);
+    for (const bet of bookmakerData.bets) {
+      try {
+        const betResult = await this.processMarketBet(
+          fixtureId,
+          bookmakerData.name,
+          bet
+        );
         
-        const marketData = await dynamicOddsMapper.mapMarketDynamically(apiBet);
+        result.markets++;
+        result.odds += betResult.oddsCount;
+        if (betResult.isNewMarket) result.newMarkets++;
         
-        market = await BettingMarket.create(marketData);
-        isNewMarket = true;
-        
-        logger.info(`✅ Mercado creado dinámicamente: ${market.key} (${market.name})`);
-      } else {
-        // ✅ ACTUALIZAR MERCADO EXISTENTE
-        await market.update({
-          usageCount: market.usageCount + 1,
-          lastSeenAt: new Date(),
-          // Actualizar outcomes si han cambiado
-          possibleOutcomes: dynamicOddsMapper.extractOutcomes(apiBet.values)
+        result.processedBets.push({
+          id: bet.id,
+          name: bet.name,
+          odds: betResult.oddsCount,
+          new: betResult.isNewMarket
         });
         
-        logger.debug(`🔄 Mercado actualizado: ${market.key}`);
+        this.stats.marketsSeen.add(`${bet.id}:${bet.name}`);
+        
+      } catch (error) {
+        logger.error(`❌ Error procesando mercado ${bet.name}:`, error.message);
+        result.errors++;
       }
-
-      const results = { 
-        created: 0, 
-        updated: 0, 
-        errors: 0, 
-        newMarket: isNewMarket 
-      };
-
-      // ✅ PROCESAR TODAS LAS ODDS DEL MERCADO
-      for (const apiValue of apiBet.values) {
-        try {
-          const oddResult = await this.processDynamicOdd(
-            fixtureId,
-            market,
-            bookmakerName,
-            apiValue
-          );
-          
-          if (oddResult.created) results.created++;
-          else if (oddResult.updated) results.updated++;
-          
-        } catch (oddError) {
-          logger.error(`❌ Error procesando odd: ${oddError.message}`);
-          results.errors++;
-        }
-      }
-
-      return results;
-
-    } catch (error) {
-      logger.error(`❌ Error procesando mercado dinámico: ${error.message}`);
-      return { created: 0, updated: 0, errors: 1, newMarket: false };
     }
+
+    return result;
   }
 
-  // ✅ PROCESAR UNA ODD INDIVIDUAL DINÁMICAMENTE
-  async processDynamicOdd(fixtureId, market, bookmakerName, apiValue) {
-    try {
-      // ✅ MAPEAR OUTCOME DINÁMICAMENTE
+  // ✅ PROCESAR UN MERCADO ESPECÍFICO
+  async processMarketBet(fixtureId, bookmakerName, bet) {
+    // Buscar o crear mercado
+    let market = await BettingMarket.findOne({
+      where: { apiFootballId: bet.id }
+    });
+
+    let isNewMarket = false;
+
+    if (!market) {
+      // Crear nuevo mercado usando el mapper mejorado
+      const marketData = await dynamicOddsMapper.mapMarketDynamically(bet);
+      market = await BettingMarket.create(marketData);
+      isNewMarket = true;
+      this.stats.newMarketsCreated++;
+      
+      logger.info(`🆕 Nuevo mercado creado: ${market.name} (${market.key})`);
+    } else {
+      // Actualizar mercado existente
+      await market.update({
+        usageCount: market.usageCount + 1,
+        lastSeenAt: new Date()
+      });
+    }
+
+    // ✅ PROCESAR TODOS LOS VALUES DEL MERCADO
+    let oddsCount = 0;
+    const oddsToCreate = [];
+    const oddsToUpdate = [];
+
+    for (const value of bet.values) {
       const mappedOdd = dynamicOddsMapper.mapOutcomeForStorage(
-        apiValue, 
-        market.key, 
+        value,
+        market.key,
         market.name
       );
 
-      // ✅ DATOS DE LA ODD
       const oddData = {
         fixtureId,
         marketId: market.id,
@@ -228,114 +205,425 @@ class DynamicOddsSyncService {
         lastUpdated: new Date()
       };
 
-      // ✅ CREAR O ACTUALIZAR ODD
-      const [odd, created] = await Odds.findOrCreate({
+      // Buscar odd existente
+      const existingOdd = await Odds.findOne({
         where: {
           fixtureId,
           marketId: market.id,
           outcome: mappedOdd.outcome,
           bookmaker: bookmakerName
-        },
-        defaults: oddData
+        }
       });
 
-      if (!created) {
-        await odd.update(oddData);
-        return { updated: true, odd };
+      if (existingOdd) {
+        oddsToUpdate.push({ id: existingOdd.id, data: oddData });
+      } else {
+        oddsToCreate.push(oddData);
       }
 
-      return { created: true, odd };
-
-    } catch (error) {
-      logger.error(`❌ Error procesando odd individual: ${error.message}`);
-      throw error;
+      oddsCount++;
     }
+
+    // Crear/actualizar odds en lote
+    if (oddsToCreate.length > 0) {
+      await Odds.bulkCreate(oddsToCreate);
+      this.stats.totalOddsProcessed += oddsToCreate.length;
+    }
+
+    if (oddsToUpdate.length > 0) {
+      for (const update of oddsToUpdate) {
+        await Odds.update(update.data, { where: { id: update.id } });
+      }
+      this.stats.totalOddsProcessed += oddsToUpdate.length;
+    }
+
+    this.stats.totalMarketsProcessed++;
+
+    return {
+      marketId: market.id,
+      marketKey: market.key,
+      oddsCount,
+      isNewMarket
+    };
   }
 
-  // ✅ CALCULAR ODDS PROMEDIO DINÁMICAMENTE
-  async calculateDynamicAverageOdds(fixtureId, marketApiIds) {
+  // ✅ CALCULAR ODDS PROMEDIO MANTENIENDO ESTRUCTURA
+  async calculateStructuredAverageOdds(fixtureId) {
     try {
-      // Obtener todos los mercados únicos para este fixture
+      // Obtener todos los mercados con odds para este fixture
       const markets = await BettingMarket.findAll({
-        where: { apiFootballId: { [Op.in]: marketApiIds } }
-      });
-
-      for (const market of markets) {
-        // Obtener todas las odds de este mercado (excluyendo Average)
-        const odds = await Odds.findAll({
+        include: [{
+          model: Odds,
+          as: 'odds',
           where: {
             fixtureId,
-            marketId: market.id,
             isActive: true,
             bookmaker: { [Op.ne]: 'Average' }
-          }
-        });
+          },
+          required: true
+        }]
+      });
 
-        if (odds.length === 0) {
-          logger.warn(`⚠️ No odds found for market ${market.id} in fixture ${fixtureId}`);
-          continue;
-        }
+      logger.debug(`📊 Calculando promedios para ${markets.length} mercados`);
 
-        // Agrupar por outcome
+      for (const market of markets) {
+        // Agrupar odds por outcome
         const outcomeGroups = {};
-        odds.forEach(odd => {
+        
+        market.odds.forEach(odd => {
           if (!outcomeGroups[odd.outcome]) {
-            outcomeGroups[odd.outcome] = [];
+            outcomeGroups[odd.outcome] = {
+              values: [],
+              originalValue: odd.value
+            };
           }
-          outcomeGroups[odd.outcome].push(parseFloat(odd.odds));
+          outcomeGroups[odd.outcome].values.push(parseFloat(odd.odds));
         });
 
-        // Calcular promedio para cada outcome
-        for (const [outcome, oddsList] of Object.entries(outcomeGroups)) {
-          if (oddsList.length === 0) continue;
+        // Calcular y guardar promedio para cada outcome
+        for (const [outcome, data] of Object.entries(outcomeGroups)) {
+          if (data.values.length === 0) continue;
           
-          const avgOdds = oddsList.reduce((sum, odd) => sum + odd, 0) / oddsList.length;
+          const avgOdds = data.values.reduce((sum, odd) => sum + odd, 0) / data.values.length;
           const avgImpliedProb = this.calculateImpliedProbability(avgOdds);
 
-          // Crear/actualizar odd promedio
-          await Odds.findOrCreate({
-            where: {
-              fixtureId,
-              marketId: market.id,
-              outcome,
-              bookmaker: 'Average'
-            },
-            defaults: {
-              fixtureId,
-              marketId: market.id,
-              bookmaker: 'Average',
-              outcome,
-              value: null,
-              odds: parseFloat(avgOdds.toFixed(2)),
-              impliedProbability: parseFloat(avgImpliedProb.toFixed(2)),
-              isActive: true,
-              lastUpdated: new Date()
-            }
-          }).then(([averageOdd, created]) => {
-            if (!created) {
-              return averageOdd.update({
-                odds: parseFloat(avgOdds.toFixed(2)),
-                impliedProbability: parseFloat(avgImpliedProb.toFixed(2)),
-                lastUpdated: new Date()
-              });
-            }
+          await Odds.upsert({
+            fixtureId,
+            marketId: market.id,
+            bookmaker: 'Average',
+            outcome,
+            value: data.originalValue,
+            odds: parseFloat(avgOdds.toFixed(2)),
+            impliedProbability: parseFloat(avgImpliedProb.toFixed(2)),
+            isActive: true,
+            lastUpdated: new Date()
           });
         }
       }
 
-      logger.debug(`✅ Odds promedio calculadas para ${markets.length} mercados`);
+      logger.debug(`✅ Promedios calculados para fixture ${fixtureId}`);
 
     } catch (error) {
-      logger.error('❌ Error calculando odds promedio dinámicamente:', error);
+      logger.error('❌ Error calculando odds promedio:', error);
     }
   }
 
-  // ✅ SINCRONIZAR ODDS DE HOY (DINÁMICO)
+  // ✅ OBTENER ODDS ESTRUCTURADAS DE UN FIXTURE
+  async getFixtureOdds(fixtureId, bookmaker = 'Average') {
+    try {
+      const cacheKey = `odds:structured:${fixtureId}:${bookmaker}`;
+      
+      // Intentar cache primero
+      const cached = await cacheService.get(cacheKey);
+      if (cached) {
+        logger.debug(`📦 Cache hit para odds estructuradas ${fixtureId}`);
+        return cached;
+      }
+
+      // ✅ CONSULTA OPTIMIZADA CON ESTRUCTURA CORRECTA
+      const odds = await Odds.findAll({
+        where: {
+          fixtureId,
+          bookmaker,
+          isActive: true
+        },
+        include: [{
+          model: BettingMarket,
+          as: 'market',
+          attributes: [
+            'id', 'apiFootballId', 'key', 'name', 
+            'category', 'priority', 'possibleOutcomes', 
+            'parameters'
+          ]
+        }],
+        order: [
+          ['market', 'priority', 'DESC'],
+          ['market', 'name', 'ASC'],
+          ['outcome', 'ASC']
+        ]
+      });
+
+      // ✅ ESTRUCTURAR CORRECTAMENTE POR CATEGORÍA Y MERCADO
+      const structured = this.structureOddsResponse(odds);
+
+      const result = {
+        fixtureId,
+        bookmaker,
+        structure: structured,
+        summary: {
+          totalCategories: Object.keys(structured.categorizedMarkets).length,
+          totalMarkets: structured.totalMarkets,
+          totalOdds: odds.length,
+          bookmakerCount: structured.bookmakerCount
+        },
+        lastSync: new Date().toISOString()
+      };
+
+      // Cache por 2 minutos
+      await cacheService.set(cacheKey, result, 120);
+      
+      return result;
+
+    } catch (error) {
+      logger.error(`❌ Error obteniendo odds estructuradas:`, error);
+      throw error;
+    }
+  }
+
+  // ✅ ESTRUCTURAR RESPUESTA DE ODDS
+  structureOddsResponse(odds) {
+    const categorizedMarkets = {};
+    const marketMap = new Map();
+    let totalMarkets = 0;
+
+    // Agrupar por mercado primero
+    odds.forEach(odd => {
+      const marketKey = odd.market.key;
+      
+      if (!marketMap.has(marketKey)) {
+        marketMap.set(marketKey, {
+          market: {
+            id: odd.market.id,
+            apiFootballId: odd.market.apiFootballId,
+            key: odd.market.key,
+            name: odd.market.name,
+            category: odd.market.category,
+            priority: odd.market.priority,
+            parameters: odd.market.parameters
+          },
+          values: []
+        });
+      }
+      
+      marketMap.get(marketKey).values.push({
+        outcome: odd.outcome,
+        value: odd.value,
+        odds: parseFloat(odd.odds),
+        impliedProbability: parseFloat(odd.impliedProbability)
+      });
+    });
+
+    // Organizar por categorías
+    marketMap.forEach((marketData, marketKey) => {
+      const category = marketData.market.category;
+      
+      if (!categorizedMarkets[category]) {
+        categorizedMarkets[category] = {};
+      }
+      
+      categorizedMarkets[category][marketKey] = {
+        ...marketData.market,
+        values: marketData.values.sort((a, b) => {
+          // Ordenar outcomes de manera lógica
+          const order = ['HOME', 'DRAW', 'AWAY', 'YES', 'NO', 'OVER', 'UNDER'];
+          const aIndex = order.indexOf(a.outcome);
+          const bIndex = order.indexOf(b.outcome);
+          
+          if (aIndex !== -1 && bIndex !== -1) {
+            return aIndex - bIndex;
+          }
+          
+          return a.outcome.localeCompare(b.outcome);
+        })
+      };
+      
+      totalMarkets++;
+    });
+
+    return {
+      categorizedMarkets,
+      totalMarkets,
+      bookmakerCount: new Set(odds.map(o => o.bookmaker)).size
+    };
+  }
+
+  // ✅ OBTENER MEJORES ODDS ESTRUCTURADAS
+  async getBestOdds(fixtureId) {
+    try {
+      const cacheKey = `odds:best:structured:${fixtureId}`;
+      
+      const cached = await cacheService.get(cacheKey);
+      if (cached) return cached;
+
+      // Obtener todas las odds activas (excluyendo Average)
+      const allOdds = await Odds.findAll({
+        where: {
+          fixtureId,
+          isActive: true,
+          bookmaker: { [Op.ne]: 'Average' }
+        },
+        include: [{
+          model: BettingMarket,
+          as: 'market',
+          attributes: ['id', 'key', 'name', 'category', 'priority']
+        }],
+        order: [
+          ['market', 'priority', 'DESC'],
+          ['odds', 'DESC']
+        ]
+      });
+
+      // Agrupar por mercado y outcome para encontrar mejores odds
+      const bestOddsMap = new Map();
+
+      allOdds.forEach(odd => {
+        const key = `${odd.marketId}:${odd.outcome}`;
+        
+        if (!bestOddsMap.has(key) || odd.odds > bestOddsMap.get(key).odds) {
+          bestOddsMap.set(key, {
+            marketId: odd.marketId,
+            market: odd.market,
+            outcome: odd.outcome,
+            value: odd.value,
+            bestOdds: parseFloat(odd.odds),
+            bookmaker: odd.bookmaker,
+            impliedProbability: parseFloat(odd.impliedProbability)
+          });
+        }
+      });
+
+      // Estructurar por categoría y mercado
+      const structured = this.structureBestOdds(bestOddsMap);
+
+      const result = {
+        fixtureId,
+        bestOdds: structured,
+        summary: {
+          totalMarkets: structured.totalMarkets,
+          totalOutcomes: bestOddsMap.size,
+          bookmakers: structured.bookmakers
+        },
+        lastSync: new Date().toISOString()
+      };
+
+      await cacheService.set(cacheKey, result, 120);
+      return result;
+
+    } catch (error) {
+      logger.error(`❌ Error obteniendo mejores odds:`, error);
+      throw error;
+    }
+  }
+
+  // ✅ ESTRUCTURAR MEJORES ODDS
+  structureBestOdds(bestOddsMap) {
+    const categorized = {};
+    const bookmakers = new Set();
+    let totalMarkets = 0;
+
+    // Agrupar por categoría y mercado
+    const marketGroups = new Map();
+
+    bestOddsMap.forEach((data, key) => {
+      const market = data.market;
+      const marketKey = market.key;
+      
+      if (!marketGroups.has(marketKey)) {
+        marketGroups.set(marketKey, {
+          market: {
+            id: market.id,
+            key: market.key,
+            name: market.name,
+            category: market.category,
+            priority: market.priority
+          },
+          outcomes: []
+        });
+      }
+      
+      marketGroups.get(marketKey).outcomes.push({
+        outcome: data.outcome,
+        value: data.value,
+        odds: data.bestOdds,
+        bookmaker: data.bookmaker,
+        impliedProbability: data.impliedProbability
+      });
+      
+      bookmakers.add(data.bookmaker);
+    });
+
+    // Organizar por categorías
+    marketGroups.forEach((marketData) => {
+      const category = marketData.market.category;
+      
+      if (!categorized[category]) {
+        categorized[category] = {};
+      }
+      
+      categorized[category][marketData.market.key] = {
+        ...marketData.market,
+        bestOdds: marketData.outcomes
+      };
+      
+      totalMarkets++;
+    });
+
+    return {
+      categorizedMarkets: categorized,
+      totalMarkets,
+      bookmakers: Array.from(bookmakers)
+    };
+  }
+
+  // ✅ UTILIDADES
+  calculateImpliedProbability(odds) {
+    return (1 / odds) * 100;
+  }
+
+  createEmptyResult(message) {
+    return {
+      fixture: null,
+      bookmakers: {},
+      summary: {
+        totalBookmakers: 0,
+        totalMarkets: 0,
+        totalOdds: 0,
+        newMarkets: 0,
+        errors: 0
+      },
+      message
+    };
+  }
+
+  // ✅ OBTENER ESTADÍSTICAS DEL SERVICIO
+  getServiceStats() {
+    const runtime = Math.round((new Date() - this.stats.startTime) / 1000);
+    
+    return {
+      runtime: `${runtime}s`,
+      totalMarketsProcessed: this.stats.totalMarketsProcessed,
+      totalOddsProcessed: this.stats.totalOddsProcessed,
+      newMarketsCreated: this.stats.newMarketsCreated,
+      uniqueBookmakers: Array.from(this.stats.bookmakersSynced),
+      uniqueMarkets: this.stats.marketsSeen.size,
+      errorsEncountered: this.stats.errorsEncountered,
+      averageOddsPerMarket: this.stats.totalMarketsProcessed > 0 
+        ? Math.round(this.stats.totalOddsProcessed / this.stats.totalMarketsProcessed)
+        : 0
+    };
+  }
+
+  // ✅ RESETEAR ESTADÍSTICAS
+  resetStats() {
+    this.stats = {
+      totalMarketsProcessed: 0,
+      totalOddsProcessed: 0,
+      newMarketsCreated: 0,
+      bookmakersSynced: new Set(),
+      marketsSeen: new Set(),
+      errorsEncountered: 0,
+      startTime: new Date()
+    };
+  }
+
+  // ✅ SINCRONIZAR ODDS DE HOY (MEJORADO)
   async syncTodayOdds() {
     try {
-      logger.info('🎯 SINCRONIZACIÓN DINÁMICA de odds de hoy...');
+      logger.info('🎯 Sincronización estructurada de odds de hoy...');
+      
+      this.resetStats();
 
-      // Buscar fixtures de hoy de ligas importantes
+      // Buscar fixtures de hoy
       const today = new Date();
       const startOfDay = new Date(today.setHours(0, 0, 0, 0));
       const endOfDay = new Date(today.setHours(23, 59, 59, 999));
@@ -345,306 +633,68 @@ class DynamicOddsSyncService {
           fixtureDate: { [Op.between]: [startOfDay, endOfDay] },
           status: { [Op.in]: ['NS', '1H', 'HT', '2H'] }
         },
-        include: [
-          {
-            model: League,
-            as: 'league',
-            where: { priority: { [Op.gte]: 75 } }, // Solo ligas importantes
-            attributes: ['id', 'name', 'priority']
-          },
-          {
-            model: Team,
-            as: 'homeTeam',
-            attributes: ['name']
-          },
-          {
-            model: Team,
-            as: 'awayTeam',
-            attributes: ['name']
-          }
-        ],
-        limit: 15 // Limitar para no gastar muchas requests
+        include: [{
+          model: League,
+          as: 'league',
+          where: { priority: { [Op.gte]: 75 } },
+          attributes: ['id', 'name', 'priority']
+        }, {
+          model: Team,
+          as: 'homeTeam',
+          attributes: ['name']
+        }, {
+          model: Team,
+          as: 'awayTeam',
+          attributes: ['name']
+        }],
+        order: [['league', 'priority', 'DESC']],
+        limit: 10
       });
 
       if (fixtures.length === 0) {
-        logger.info('ℹ️ No hay fixtures de ligas importantes para sincronizar odds hoy');
-        return { totalFixtures: 0, totalOdds: 0 };
+        logger.info('ℹ️ No hay fixtures importantes para sincronizar hoy');
+        return { totalFixtures: 0, stats: this.getServiceStats() };
       }
 
-      logger.info(`📊 Encontrados ${fixtures.length} fixtures importantes para sincronización dinámica`);
+      logger.info(`📊 Encontrados ${fixtures.length} fixtures para sincronizar`);
 
-      const results = {
-        totalFixtures: fixtures.length,
-        totalOdds: 0,
-        totalMarkets: 0,
-        newMarkets: 0,
-        errors: 0,
-        processed: 0,
-        startTime: new Date()
-      };
-
+      const results = [];
+      
       for (const fixture of fixtures) {
         try {
-          logger.info(`🔄 [${results.processed + 1}/${fixtures.length}] ${fixture.homeTeam.name} vs ${fixture.awayTeam.name}`);
+          logger.info(`🔄 Sincronizando: ${fixture.homeTeam.name} vs ${fixture.awayTeam.name}`);
+          
+          const syncResult = await this.syncFixtureOdds(fixture.apiFootballId);
+          results.push(syncResult);
           
           // Pausa para rate limiting
           await new Promise(resolve => setTimeout(resolve, 3000));
           
-          const oddsResult = await this.syncFixtureOdds(fixture.apiFootballId);
-          
-          results.totalOdds += oddsResult.created + oddsResult.updated;
-          results.totalMarkets += oddsResult.markets;
-          results.newMarkets += oddsResult.newMarkets || 0;
-          results.errors += oddsResult.errors;
-          results.processed++;
-          
         } catch (error) {
-          logger.error(`❌ Error en fixture ${fixture.apiFootballId}: ${error.message}`);
-          results.errors++;
-          results.processed++;
+          logger.error(`❌ Error en fixture ${fixture.id}: ${error.message}`);
           
-          // Si es rate limit, detener
-          if (error.message.includes('Rate limit') || error.message.includes('429')) {
-            logger.error('🚨 RATE LIMIT - Deteniendo sincronización');
+          if (error.message.includes('Rate limit')) {
+            logger.error('🚨 Rate limit alcanzado, deteniendo sincronización');
             break;
           }
         }
       }
 
-      const endTime = new Date();
-      const duration = Math.round((endTime - results.startTime) / 1000);
-
-      const summaryMessage = `✅ SINCRONIZACIÓN DINÁMICA DE ODDS COMPLETADA:
-        ⏱️ Duración: ${duration}s
-        📊 ${results.totalOdds} odds de ${results.processed}/${results.totalFixtures} fixtures
-        🆕 ${results.newMarkets} nuevos mercados detectados automáticamente
-        📈 ${results.totalMarkets} mercados procesados
-        ❌ ${results.errors} errores`;
+      const finalStats = this.getServiceStats();
       
-      logger.info(summaryMessage);
+      logger.info(`✅ Sincronización de hoy completada:`, finalStats);
       
-      // ✅ LOG ESTADÍSTICAS GLOBALES
-      logger.info(`📊 ESTADÍSTICAS GLOBALES DEL SERVICIO:`, this.stats);
-      
-      return results;
-
-    } catch (error) {
-      logger.error('❌ Error en sincronización dinámica de odds de hoy:', error);
-      throw error;
-    }
-  }
-
-  // ✅ OBTENER ODDS DE UN FIXTURE (DINÁMICO)
-  async getFixtureOdds(fixtureId, bookmaker = 'Average') {
-    try {
-      const cacheKey = `odds:dynamic:${fixtureId}:${bookmaker}`;
-      
-      const cached = await cacheService.get(cacheKey);
-      if (cached) {
-        logger.debug(`📦 Cache hit para odds dinámicas fixture ${fixtureId}`);
-        return cached;
-      }
-
-      // ✅ OBTENER TODAS LAS ODDS SIN FILTRO DE MERCADO
-      const odds = await Odds.findAll({
-        where: {
-          fixtureId,
-          bookmaker,
-          isActive: true
-        },
-        include: [
-          {
-            model: BettingMarket,
-            as: 'market',
-            attributes: ['id', 'key', 'name', 'category', 'apiFootballId', 'priority', 'possibleOutcomes']
-          }
-        ],
-        order: [
-          ['market', 'priority', 'DESC'],
-          ['market', 'name', 'ASC']
-        ]
-      });
-
-      // ✅ AGRUPAR POR CATEGORÍA Y MERCADO
-      const groupedOdds = {};
-      const categories = {};
-
-      odds.forEach(odd => {
-        const category = odd.market.category;
-        const marketKey = odd.market.key;
-        
-        if (!categories[category]) {
-          categories[category] = {};
-        }
-        
-        if (!categories[category][marketKey]) {
-          categories[category][marketKey] = {
-            market: {
-              id: odd.market.id,
-              apiFootballId: odd.market.apiFootballId,
-              key: odd.market.key,
-              name: odd.market.name,
-              category: odd.market.category,
-              priority: odd.market.priority,
-              possibleOutcomes: odd.market.possibleOutcomes
-            },
-            odds: {}
-          };
-        }
-        
-        categories[category][marketKey].odds[odd.outcome] = {
-          value: odd.value,
-          odds: parseFloat(odd.odds),
-          impliedProbability: parseFloat(odd.impliedProbability),
-          lastUpdated: odd.lastUpdated
-        };
-      });
-
-      const result = {
-        fixtureId,
-        bookmaker,
-        totalMarkets: Object.values(categories).reduce((sum, cat) => sum + Object.keys(cat).length, 0),
-        totalCategories: Object.keys(categories).length,
-        categorizedMarkets: categories,
-        lastSync: new Date().toISOString(),
-        isDynamic: true
-      };
-
-      // Cache por 5 minutos
-      await cacheService.set(cacheKey, result, 300);
-      
-      return result;
-
-    } catch (error) {
-      logger.error(`❌ Error obteniendo odds dinámicas de fixture ${fixtureId}:`, error);
-      throw error;
-    }
-  }
-
-  // ✅ OBTENER ESTADÍSTICAS DINÁMICAS
-  async getOddsStats() {
-    try {
-      const [marketStats, oddsStats] = await Promise.all([
-        BettingMarket.findAll({
-          attributes: [
-            'category',
-            [BettingMarket.sequelize.fn('COUNT', BettingMarket.sequelize.col('id')), 'count'],
-            [BettingMarket.sequelize.fn('AVG', BettingMarket.sequelize.col('usage_count')), 'avgUsage'],
-            [BettingMarket.sequelize.fn('MAX', BettingMarket.sequelize.col('last_seen_at')), 'lastSeen']
-          ],
-          group: ['category'],
-          order: [[BettingMarket.sequelize.fn('COUNT', BettingMarket.sequelize.col('id')), 'DESC']]
-        }),
-        Odds.findAll({
-          attributes: [
-            'bookmaker',
-            [Odds.sequelize.fn('COUNT', Odds.sequelize.col('id')), 'count'],
-            [Odds.sequelize.fn('MAX', Odds.sequelize.col('last_updated')), 'lastUpdate']
-          ],
-          group: ['bookmaker'],
-          order: [[Odds.sequelize.fn('COUNT', Odds.sequelize.col('id')), 'DESC']]
-        })
-      ]);
-
       return {
-        isDynamic: true,
-        serviceStats: this.stats,
-        marketsByCategory: marketStats,
-        oddsByBookmaker: oddsStats,
-        totalMarkets: marketStats.reduce((sum, stat) => sum + parseInt(stat.dataValues.count), 0),
-        totalOdds: oddsStats.reduce((sum, stat) => sum + parseInt(stat.dataValues.count), 0),
-        mappingStats: dynamicOddsMapper.getMappingStats(),
-        lastUpdate: new Date().toISOString()
+        totalFixtures: results.length,
+        fixtures: results,
+        stats: finalStats
       };
 
     } catch (error) {
-      logger.error('❌ Error obteniendo estadísticas dinámicas:', error);
-      throw error;
-    }
-  }
-
-  // ✅ UTILIDADES
-  calculateImpliedProbability(odds) {
-    return (1 / odds) * 100;
-  }
-
-  // ✅ OBTENER MEJORES ODDS (DINÁMICO)
-  async getBestOdds(fixtureId) {
-    try {
-      const cacheKey = `odds:best:dynamic:${fixtureId}`;
-      
-      const cached = await cacheService.get(cacheKey);
-      if (cached) return cached;
-
-      // Obtener todos los mercados para este fixture
-      const markets = await BettingMarket.findAll({
-        include: [{
-          model: Odds,
-          as: 'odds',
-          where: { 
-            fixtureId, 
-            isActive: true,
-            bookmaker: { [Op.ne]: 'Average' }
-          },
-          required: true
-        }],
-        order: [['priority', 'DESC']]
-      });
-
-      const bestOdds = {};
-
-      for (const market of markets) {
-        const outcomeGroups = {};
-        
-        market.odds.forEach(odd => {
-          if (!outcomeGroups[odd.outcome]) {
-            outcomeGroups[odd.outcome] = [];
-          }
-          outcomeGroups[odd.outcome].push({
-            odds: parseFloat(odd.odds),
-            bookmaker: odd.bookmaker,
-            lastUpdated: odd.lastUpdated
-          });
-        });
-
-        const marketBest = {};
-        for (const [outcome, oddsList] of Object.entries(outcomeGroups)) {
-          const best = oddsList.reduce((max, current) => 
-            current.odds > max.odds ? current : max
-          );
-          marketBest[outcome] = best;
-        }
-
-        if (Object.keys(marketBest).length > 0) {
-          bestOdds[market.key] = {
-            market: {
-              id: market.id,
-              key: market.key,
-              name: market.name,
-              category: market.category,
-              priority: market.priority
-            },
-            bestOdds: marketBest
-          };
-        }
-      }
-
-      const result = {
-        fixtureId,
-        bestOdds,
-        totalMarkets: Object.keys(bestOdds).length,
-        isDynamic: true,
-        lastSync: new Date().toISOString()
-      };
-
-      await cacheService.set(cacheKey, result, 120);
-      return result;
-
-    } catch (error) {
-      logger.error(`❌ Error obteniendo mejores odds dinámicas: ${error.message}`);
+      logger.error('❌ Error en sincronización de odds de hoy:', error);
       throw error;
     }
   }
 }
 
-module.exports = new DynamicOddsSyncService();
+module.exports = new ImprovedOddsSyncService();

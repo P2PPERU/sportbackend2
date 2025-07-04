@@ -52,6 +52,14 @@ router.get('/bookmakers', oddsController.getBookmakers);
 // GET /api/odds/stats - Estadísticas de odds
 router.get('/stats', oddsController.getOddsStats);
 
+// Comparar odds entre bookmakers
+router.get('/fixture/:id/compare', oddsLimiter, oddsController.compareFixtureOdds);
+
+// Mercados más populares
+router.get('/markets/popular', oddsController.getPopularMarkets);
+
+
+
 // ═══════════════════════════════════════════════════════════════════
 // RUTAS ADMINISTRATIVAS
 // ═══════════════════════════════════════════════════════════════════
